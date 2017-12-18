@@ -164,7 +164,7 @@ void FBXExporter::WriteBinaryHeader(
 ){
     // first a specific sequence of 23 bytes, always the same
     const char binary_header[24] = "Kaydara FBX Binary\x20\x20\x00\x1a\x00";
-    outfile->Write(binary_header, 23, 1);
+    outfile->Write(binary_header, 1, 23);
     
     // then FBX version number, "multiplied" by 1000, as little-endian uint32.
     // so 7.3 becomes 7300 == 0x841C0000, 7.4 becomes 7400 == 0xE81C0000, etc
@@ -181,13 +181,17 @@ void FBXExporter::WriteBinaryFooter(
     std::shared_ptr<IOStream> outfile
 ){
     outfile->Write(GENERIC_FOOTID.c_str(), GENERIC_FOOTID.size(), 1);
-    outfile->Write("\x00", 1, 4);
+    for (size_t i = 0; i < 4; ++i) {
+        outfile->Write("\x00", 1, 1);
+    }
 
     // here some padding is added for alignment to 16 bytes.
     // if already aligned, the full 16 bytes is added.
     size_t pos = outfile->Tell();
     size_t pad = 16 - (pos % 16);
-    outfile->Write("\x00", 1, pad);
+    for (size_t i = 0; i < pad; ++i) {
+        outfile->Write("\x00", 1, 1);
+    }
 
     // now the file version again
     {
@@ -196,11 +200,13 @@ void FBXExporter::WriteBinaryFooter(
     } // StreamWriter destructor writes the data to the file
 
     // and finally some binary footer added to all files
-    outfile->Write("\x00", 1, 120);
+    for (size_t i = 0; i < 120; ++i) {
+        outfile->Write("\x00", 1, 1);
+    }
     outfile->Write(
         "\xf8\x5a\x8c\x6a\xde\xf5\xd9\x7e\xec\xe9\x0c\xe3\x75\x8f\x29\x0b",
-        16,
-        1
+        1,
+        16
     );
 }
 
