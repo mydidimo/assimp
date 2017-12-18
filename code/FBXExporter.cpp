@@ -271,11 +271,7 @@ void FBXExporter::WriteAllNodes (
     // connections
     WriteConnections(outfile);
     
-    // takes? (deprecated since at least 2015 (fbx 7.4))
-    
-    // footer
-    WriteFooter(outfile);
-    
+    // WriteTakes? (deprecated since at least 2015 (fbx 7.4))
 }
 
 void FBXExporter::WriteHeaderExtension (
@@ -311,11 +307,6 @@ void FBXExporter::WriteObjects (
 }
 
 void FBXExporter::WriteConnections (
-    std::shared_ptr<IOStream> outfile
-){
-}
-
-void FBXExporter::WriteFooter (
     std::shared_ptr<IOStream> outfile
 ){
 }

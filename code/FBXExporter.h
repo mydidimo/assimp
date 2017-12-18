@@ -120,7 +120,6 @@ namespace Assimp
         void WriteObjects(std::shared_ptr<IOStream> outfile);
         void WriteConnections(std::shared_ptr<IOStream> outfile);
         // WriteTakes(); // deprecated since at least 2015 (fbx 7.4)
-        void WriteFooter(std::shared_ptr<IOStream> outfile);
     };
 
 }
