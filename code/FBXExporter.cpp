@@ -360,6 +360,34 @@ void FBXExporter::WriteHeaderExtension ()
 
 void FBXExporter::WriteGlobalSettings ()
 {
+    FBX::Node gs("GlobalSettings");
+    gs.AddChild("Version", int32_t(1000));
+
+    FBX::Node p("Properties70");
+    p.AddP70I("UpAxis", 1);
+    p.AddP70I("UpAxisSign", 1);
+    p.AddP70I("FrontAxis", 2);
+    p.AddP70I("FrontAxisSign", 1);
+    p.AddP70I("CoordAxis", 0);
+    p.AddP70I("CoordAxisSign", 1);
+    p.AddP70I("OriginalUpAxis", 1);
+    p.AddP70I("OriginalUpAxisSign", 1);
+    p.AddP70D("UnitScaleFactor", 1.0);
+    p.AddP70D("OriginalUnitScaleFactor", 1.0);
+    p.AddP70RGB("AmbientColor", 0.0, 0.0, 0.0);
+    p.AddP70S("DefaultCamera", "Producer Perspective");
+    p.AddP70E("TimeMode", 11);
+    p.AddP70E("TimeProtocol", 2);
+    p.AddP70E("SnapOnFrameMode", 0);
+    p.AddP70T("TimeSpanStart", 0); // ?
+    p.AddP70T("TimeSpanStop", 0); // ?
+    p.AddP70D("CustomFrameRate", -1.0);
+    p.AddP70Compound("TimeMarker"); // not sure what this is
+    p.AddP70I("CurrentTimeMarker", -1);
+    gs.AddChild(p);
+    
+    StreamWriterLE outstream(outfile);
+    gs.Dump(outstream);
 }
 
 void FBXExporter::WriteDocuments ()

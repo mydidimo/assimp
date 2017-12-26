@@ -58,6 +58,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //#include <map>
 #include <memory> // shared_ptr
 #include <sstream> // stringstream
+#include <type_traits> // is_void
 
 using std::unique_ptr;
 
@@ -184,14 +185,26 @@ namespace FBX
             uint8_t* d = data.data();
             (reinterpret_cast<int64_t*>(d))[0] = v;
         }
+        explicit Property(const char* c, bool raw=false)
+                : Property(std::string(c), raw) {}
         explicit Property(const std::string& s, bool raw=false)
-            : type(raw ? 'R' : 'S'), data(s.size()) {
+                : type(raw ? 'R' : 'S'), data(s.size()) {
             for (size_t i = 0; i < s.size(); ++i) {
                 data[i] = uint8_t(s[i]);
             }
         }
         explicit Property(const std::vector<uint8_t>& r) : type('R'), data(r) {}
         // TODO: array types
+        
+        // this will catch any type not defined above,
+        // so that we don't accidentally convert something we don't want.
+        // for example (const char*) --> (bool)... seriously wtf C++
+        template <class T>
+        Property(T v) : type('X') {
+            static_assert(std::is_void<T>::value,
+                "TRIED TO CREATE FBX PROPERTY WITH UNSUPPORTED TYPE,"
+                " CHECK YOUR PROPERTY INSTANTIATION");
+        }
         
         size_t size() { return data.size() + 1; } // TODO: array types size()
         
@@ -235,14 +248,24 @@ namespace FBX
         Node(const std::string& n, const std::vector<Property> &pv)
             : name(n), properties(pv) {}
     public:
+        // add a single property to the node
         template <typename T>
-        void AddProperty(
-            const std::string& name,
-            T value
-        ){
+        void AddProperty(T value) {
             properties.emplace_back(value);
         }
         
+        // convenience function to add multiple properties at once
+        template <typename T, typename... More>
+        void AddProperties(T value, More... more) {
+            properties.emplace_back(value);
+            AddProperties(more...);
+        }
+        void AddProperties() {}
+        
+        // add a child node directly
+        void AddChild(const Node& node) { children.push_back(node); }
+        
+        // convenience function to add a child node with a single property
         template <typename T>
         void AddChild(
             const std::string& name,
@@ -250,6 +273,44 @@ namespace FBX
         ){
             children.emplace_back(name, Property(value));
         }
+    public:
+        // Properties70 Nodes
+        void AddP70I(const std::string& name, int32_t value) {
+            Node n("P");
+            n.AddProperties(name, "int", "Integer", "", value);
+            AddChild(n);
+        }
+        void AddP70D(const std::string& name, double value) {
+            Node n("P");
+            n.AddProperties(name, "double", "Number", "", value);
+            AddChild(n);
+        }
+        void AddP70RGB(const std::string& name, double r, double g, double b) {
+            Node n("P");
+            n.AddProperties(name, "ColorRGB", "Color", "", r, g, b);
+            AddChild(n);
+        }
+        void AddP70S(const std::string& name, const std::string& value) {
+            Node n("P");
+            n.AddProperties(name, "KString", "", "", value);
+            AddChild(n);
+        }
+        void AddP70E(const std::string& name, int32_t value) {
+            Node n("P");
+            n.AddProperties(name, "enum", "", "", value);
+            AddChild(n);
+        }
+        void AddP70T(const std::string& name, int64_t value) {
+            Node n("P");
+            n.AddProperties(name, "KTime", "Time", "", value);
+            AddChild(n);
+        }
+        void AddP70Compound(const std::string& name) {
+            Node n("P");
+            n.AddProperties(name, "Compound", "", "");
+            AddChild(n);
+        }
+    
     public: // member functions
         void Dump(Assimp::StreamWriterLE &s) {
             // remember start pos so we can come back and write the end pos
@@ -298,7 +359,8 @@ namespace FBX
         size_t end_pos; // ending position in stream
     };
 
-
+    /* convenience function to create a node with a single property,
+     * and write it to the stream. */
     template <typename T>
     void WritePropertyNode(
         const std::string& name,
