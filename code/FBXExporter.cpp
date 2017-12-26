@@ -45,14 +45,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "StreamWriter.h"
 
-#include "Exceptional.h"
+#include "Exceptional.h" // DeadlyExportError
 //#include "StringComparison.h"
 //#include "ByteSwapper.h"
 
 //#include "SplitLargeMeshes.h"
 
 //#include <assimp/SceneCombiner.h>
-//#include <assimp/version.h>
+#include <assimp/version.h>
 #include <assimp/IOSystem.hpp>
 #include <assimp/Exporter.hpp>
 //#include <assimp/material.h>
@@ -62,6 +62,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <memory> // shared_ptr
 #include <string>
 #include <sstream> // stringstream
+#include <ctime> // localtime, tm_*
 //#include <inttypes.h>
 
 
@@ -139,7 +140,7 @@ void FBXExporter::ExportBinary (
     binary = true;
     
     // open the indicated file for writing (in binary mode)
-    std::shared_ptr<IOStream> outfile(pIOSystem->Open(pFile,"wb"));
+    outfile.reset(pIOSystem->Open(pFile,"wb"));
     if (!outfile) {
         throw DeadlyExportError(
             "could not open output .fbx file: " + std::string(pFile)
@@ -147,21 +148,60 @@ void FBXExporter::ExportBinary (
     }
     
     // first a binary-specific file header
-    WriteBinaryHeader(outfile);
+    WriteBinaryHeader();
     
     // the rest of the file is in node entries.
     // we have to serialize each entry before we write to the output,
     // as the first thing we write is the byte offset of the _next_ entry.
     // Either that or we can skip back to write the offset when we finish.
-    WriteAllNodes(outfile);
+    WriteAllNodes();
     
     // finally we have a binary footer to the file
-    WriteBinaryFooter(outfile);
+    WriteBinaryFooter();
+    
+    // explicitly release file pointer,
+    // so we don't have to rely on class destruction.
+    outfile.reset();
 }
 
-void FBXExporter::WriteBinaryHeader(
-    std::shared_ptr<IOStream> outfile
+void FBXExporter::ExportAscii (
+    const char* pFile,
+    IOSystem* pIOSystem
 ){
+    // remember that we're exporting in ascii mode
+    binary = false;
+    
+    // open the indicated file for writing in text mode
+    outfile.reset(pIOSystem->Open(pFile,"wt"));
+    if (!outfile) {
+        throw DeadlyExportError(
+            "could not open output .fbx file: " + std::string(pFile)
+        );
+    }
+    
+    // this isn't really necessary,
+    // but the Autodesk FBX SDK puts a similar comment at the top of the file.
+    // Theirs declares that the file copyright is owned by Autodesk...
+    std::stringstream head;
+    using std::endl;
+    head << "; FBX " << EXPORT_VERSION_STR << " project file" << endl;
+    head << "; Created by the Open Asset Import Library (Assimp)" << endl;
+    head << "; http://assimp.org" << endl;
+    head << "; -------------------------------------------------" << endl;
+    head << endl;
+    const std::string ascii_header = head.str();
+    outfile->Write(ascii_header.c_str(), ascii_header.size(), 1);
+    
+    // write all the sections
+    WriteAllNodes();
+    
+    // explicitly release file pointer,
+    // so we don't have to rely on class destruction.
+    outfile.reset();
+}
+
+void FBXExporter::WriteBinaryHeader()
+{
     // first a specific sequence of 23 bytes, always the same
     const char binary_header[24] = "Kaydara FBX Binary\x20\x20\x00\x1a\x00";
     outfile->Write(binary_header, 1, 23);
@@ -177,9 +217,8 @@ void FBXExporter::WriteBinaryHeader(
     // (probably with the FBXHEaderExtension node)
 }
 
-void FBXExporter::WriteBinaryFooter(
-    std::shared_ptr<IOStream> outfile
-){
+void FBXExporter::WriteBinaryFooter()
+{
     outfile->Write(GENERIC_FOOTID.c_str(), GENERIC_FOOTID.size(), 1);
     for (size_t i = 0; i < 4; ++i) {
         outfile->Write("\x00", 1, 1);
@@ -210,106 +249,131 @@ void FBXExporter::WriteBinaryFooter(
     );
 }
 
-void FBXExporter::ExportAscii (
-    const char* pFile,
-    IOSystem* pIOSystem
-){
-    // remember that we're exporting in ascii mode
-    binary = false;
-    
-    // open the indicated file for writing in text mode
-    std::shared_ptr<IOStream> outfile(pIOSystem->Open(pFile,"wt"));
-    if (!outfile) {
-        throw DeadlyExportError(
-            "could not open output .fbx file: " + std::string(pFile)
-        );
-    }
-    
-    // this isn't really necessary,
-    // but the Autodesk FBX SDK puts a similar comment at the top of the file.
-    // Theirs declares that the file copyright is owned by Autodesk...
-    std::stringstream head;
-    using std::endl;
-    head << "; FBX " << EXPORT_VERSION_STR << " project file" << endl;
-    head << "; Created by the Open Asset Import Library (Assimp)" << endl;
-    head << "; http://assimp.org" << endl;
-    head << "; -------------------------------------------------" << endl;
-    head << endl;
-    const std::string ascii_header = head.str();
-    outfile->Write(ascii_header.c_str(), ascii_header.size(), 1);
-    
-    // write all the sections
-    WriteAllNodes(outfile);
-    
-    // done
-}
-
-void FBXExporter::WriteAllNodes (
-    std::shared_ptr<IOStream> outfile
-){
+void FBXExporter::WriteAllNodes ()
+{
     // header
     // (and fileid, creation time, creator, if binary)
-    WriteHeaderExtension(outfile);
-    
-    // ...included in WriteHeader
+    WriteHeaderExtension();
     
     // global settings
-    WriteGlobalSettings(outfile);
+    WriteGlobalSettings();
     
     // documents
-    WriteDocuments(outfile);
+    WriteDocuments();
     
     // references
-    WriteReferences(outfile);
+    WriteReferences();
     
     // definitions
-    WriteDefinitions(outfile);
+    WriteDefinitions();
     
     // objects
-    WriteObjects(outfile);
+    WriteObjects();
     
     // connections
-    WriteConnections(outfile);
+    WriteConnections();
     
     // WriteTakes? (deprecated since at least 2015 (fbx 7.4))
 }
 
-void FBXExporter::WriteHeaderExtension (
-    std::shared_ptr<IOStream> outfile
-){
-    // make the top header
+//FBXHeaderExtension top-level node
+void FBXExporter::WriteHeaderExtension ()
+{
+    std::string node_name = "FBXHeaderExtension";
+    StreamWriterLE outstream(outfile);
     
+    // if writing in binary, need to remember the position here
+    // so we can come back and write the location of the next node.
+    size_t start_loc = outstream.Tell();
+    
+    // placeholder for end offset (we'll come back and write it later)
+    outstream.PutU4(0);
+    
+    // number of properties in this node (uint32)
+    outstream.PutU4(0);
+    
+    // total length of property section in this node (uint32)
+    outstream.PutU4(0);
+    
+    // length of node name (uint8)
+    outstream.PutU1(node_name.size());
+    
+    // node name (unterinated string)
+    outstream.PutString(node_name);
+    
+    // write properties
+    // (none)
+    
+    // write child nodes
+    WritePropertyNode("FBXHeaderVersion", int32_t(1003), outstream);
+    WritePropertyNode("FBXVersion", int32_t(EXPORT_VERSION_INT), outstream);
+    WritePropertyNode("EncryptionType", int32_t(0), outstream);
+    FBX::Node CreationTimeStamp("CreationTimeStamp");
+    time_t rawtime;
+    time(&rawtime);
+    struct tm * now = localtime(&rawtime);
+    CreationTimeStamp.AddChild("Version", int32_t(1000));
+    CreationTimeStamp.AddChild("Year", int32_t(now->tm_year + 1900));
+    CreationTimeStamp.AddChild("Month", int32_t(now->tm_mon + 1));
+    CreationTimeStamp.AddChild("Day", int32_t(now->tm_mday));
+    CreationTimeStamp.AddChild("Hour", int32_t(now->tm_hour));
+    CreationTimeStamp.AddChild("Minute", int32_t(now->tm_min));
+    CreationTimeStamp.AddChild("Second", int32_t(now->tm_sec));
+    CreationTimeStamp.AddChild("Millisecond", int32_t(0));
+    CreationTimeStamp.Dump(outstream);
+    std::stringstream creator;
+    creator << "Open Asset Import Library (Assimp) " << aiGetVersionMajor()
+            << "." << aiGetVersionMinor() << "-r" << aiGetVersionRevision();
+    WritePropertyNode("Creator", creator.str(), outstream);
+    
+    // write node list terminator block
+    outstream.PutString(NULL_RECORD);
+    
+    // write current position (start of next node) to beginning of node
+    size_t end_loc = outstream.Tell();
+    outstream.Seek(start_loc);
+    outstream.PutU4(end_loc);
+    outstream.Seek(end_loc);
 }
 
-void FBXExporter::WriteGlobalSettings (
-    std::shared_ptr<IOStream> outfile
-){
+void FBXExporter::WriteGlobalSettings ()
+{
 }
 
-void FBXExporter::WriteDocuments (
-    std::shared_ptr<IOStream> outfile
-){
+void FBXExporter::WriteDocuments ()
+{
 }
 
-void FBXExporter::WriteReferences (
-    std::shared_ptr<IOStream> outfile
-){
+void FBXExporter::WriteReferences ()
+{
 }
 
-void FBXExporter::WriteDefinitions (
-    std::shared_ptr<IOStream> outfile
-){
+void FBXExporter::WriteDefinitions ()
+{
 }
 
-void FBXExporter::WriteObjects (
-    std::shared_ptr<IOStream> outfile
-){
+void FBXExporter::WriteObjects ()
+{
 }
 
-void FBXExporter::WriteConnections (
-    std::shared_ptr<IOStream> outfile
-){
+void FBXExporter::WriteConnections ()
+{
 }
+
+
+void FBX::Node::Begin(
+    Assimp::StreamWriterLE &s
+    ,int32_t numProperties
+){
+    //STUB
+}
+
+void FBX::Node::End(
+    Assimp::StreamWriterLE &s
+){
+    //STUB
+}
+
 
 #endif // ASSIMP_BUILD_NO_FBX_EXPORTER
 #endif // ASSIMP_BUILD_NO_EXPORT
