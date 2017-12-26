@@ -184,11 +184,13 @@ namespace FBX
             uint8_t* d = data.data();
             (reinterpret_cast<int64_t*>(d))[0] = v;
         }
-        explicit Property(const std::string& s) : type('S'), data(s.size()) {
+        explicit Property(const std::string& s, bool raw=false)
+            : type(raw ? 'R' : 'S'), data(s.size()) {
             for (size_t i = 0; i < s.size(); ++i) {
                 data[i] = uint8_t(s[i]);
             }
         }
+        explicit Property(const std::vector<uint8_t>& r) : type('R'), data(r) {}
         // TODO: array types
         
         size_t size() { return data.size() + 1; } // TODO: array types size()
@@ -204,9 +206,11 @@ namespace FBX
             case 'L': s.PutU8(*(reinterpret_cast<int64_t*>(data.data()))); return;
             case 'S':
                 s.PutU4(data.size());
-                for (size_t i = 0; i < data.size(); ++i) {
-                    s.PutU1(data[i]);
-                }
+                for (size_t i = 0; i < data.size(); ++i) { s.PutU1(data[i]); }
+                return;
+            case 'R':
+                s.PutU4(data.size());
+                for (size_t i = 0; i < data.size(); ++i) { s.PutU1(data[i]); }
                 return;
             default:
                 std::stringstream err;

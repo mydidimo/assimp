@@ -308,6 +308,7 @@ void FBXExporter::WriteHeaderExtension ()
     WritePropertyNode("FBXHeaderVersion", int32_t(1003), outstream);
     WritePropertyNode("FBXVersion", int32_t(EXPORT_VERSION_INT), outstream);
     WritePropertyNode("EncryptionType", int32_t(0), outstream);
+    
     FBX::Node CreationTimeStamp("CreationTimeStamp");
     time_t rawtime;
     time(&rawtime);
@@ -321,10 +322,20 @@ void FBXExporter::WriteHeaderExtension ()
     CreationTimeStamp.AddChild("Second", int32_t(now->tm_sec));
     CreationTimeStamp.AddChild("Millisecond", int32_t(0));
     CreationTimeStamp.Dump(outstream);
+    
     std::stringstream creator;
     creator << "Open Asset Import Library (Assimp) " << aiGetVersionMajor()
             << "." << aiGetVersionMinor() << "-r" << aiGetVersionRevision();
     WritePropertyNode("Creator", creator.str(), outstream);
+    
+    FBX::Node sceneinfo("SceneInfo");
+    // bloody null bytes in strings everywhere
+    //std::stringstream gisi;
+    //gisi << "GlobalInfo" << '\x00' << '\x01' << "SceneInfo";
+    //sceneinfo.AddProperty(gisi.str());
+    // not sure if any of it is needed anyway,
+    // so just write an empty node for now.
+    sceneinfo.Dump(outstream);
     
     // write node list terminator block
     outstream.PutString(NULL_RECORD);
@@ -334,6 +345,17 @@ void FBXExporter::WriteHeaderExtension ()
     outstream.Seek(start_loc);
     outstream.PutU4(end_loc);
     outstream.Seek(end_loc);
+    
+    // that's it for FBXHeaderExtension...
+    
+    // but binary files also need top-level FileID, CreationTime, Creator:
+    std::vector<uint8_t> raw(GENERIC_FILEID.size());
+    for (size_t i = 0; i < GENERIC_FILEID.size(); ++i) {
+        raw[i] = uint8_t(GENERIC_FILEID[i]);
+    }
+    WritePropertyNode("FileId", raw, outstream);
+    WritePropertyNode("CreationTime", GENERIC_CTIME, outstream);
+    WritePropertyNode("Creator", creator.str(), outstream);
 }
 
 void FBXExporter::WriteGlobalSettings ()
