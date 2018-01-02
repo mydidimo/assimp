@@ -316,15 +316,12 @@ void FBXExporter::WriteHeaderExtension ()
     
     std::stringstream creator;
     creator << "Open Asset Import Library (Assimp) " << aiGetVersionMajor()
-            << "." << aiGetVersionMinor() << "-r" << aiGetVersionRevision();
+            << "." << aiGetVersionMinor() << "." << aiGetVersionRevision();
     WritePropertyNode("Creator", creator.str(), outstream);
     
     FBX::Node sceneinfo("SceneInfo");
-    // bloody null bytes in strings everywhere
-    //std::stringstream gisi;
-    //gisi << "GlobalInfo" << '\x00' << '\x01' << "SceneInfo";
-    //sceneinfo.AddProperty(gisi.str());
-    // not sure if any of it is needed anyway,
+    //sceneinfo.AddProperty("GlobalInfo" + FBX::SEPARATOR + "SceneInfo");
+    // not sure if any of this is actually needed,
     // so just write an empty node for now.
     sceneinfo.Dump(outstream);
     
@@ -680,7 +677,7 @@ void FBXExporter::WriteObjects ()
         // output vertex data - each vertex should be unique (probably)
         std::vector<double> flattened_vertices;
         // index of original vertex in vertex data vector
-        std::vector<size_t> vertex_indices;
+        std::vector<int32_t> vertex_indices;
         // map of vertex value to its index in the data vector
         std::map<aiVector3D,size_t> index_by_vertex_value;
         size_t index = 0;
@@ -701,20 +698,27 @@ void FBXExporter::WriteObjects ()
         WritePropertyNode("Vertices", flattened_vertices, outstream);
         
         // output polygon data as a flattened array of vertex indices.
-        // the last vertex index of each polygon is negated
+        // the last vertex index of each polygon is negated and - 1
         std::vector<int32_t> polygon_data;
         for (size_t j = 0; j < m->mNumFaces; ++j) {
             const aiFace &f = m->mFaces[j];
             for (size_t k = 0; k < f.mNumIndices - 1; ++k) {
-                polygon_data.push_back(f.mIndices[k]);
+                polygon_data.push_back(vertex_indices[f.mIndices[k]]);
             }
-            polygon_data.push_back(-(int32_t(f.mIndices[f.mNumIndices-1])));
+            polygon_data.push_back(-1 - vertex_indices[f.mIndices[f.mNumIndices-1]]);
         }
         WritePropertyNode("PolygonVertexIndex", polygon_data, outstream);
         
-        // here should be edges but they're insane.
+        // here could be edges but they're insane.
+        // it's optional anyway, so let's ignore it.
         
         WritePropertyNode("GeometryVersion", int32_t(124), outstream);
+        
+        // here should be normals, UVs etc.
+        // they're added as "layers".
+        
+        // finally we have the layer specifications,
+        // which select the normals / UV set / etc to use.
         
         // finish the node record
         n.End(outstream, true);
