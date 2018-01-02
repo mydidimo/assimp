@@ -56,13 +56,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assimp/IOSystem.hpp>
 #include <assimp/Exporter.hpp>
 //#include <assimp/material.h>
-//#include <assimp/scene.h>
+#include <assimp/scene.h>
+#include <assimp/mesh.h>
 
 // Header files, standard library.
 #include <memory> // shared_ptr
 #include <string>
 #include <sstream> // stringstream
 #include <ctime> // localtime, tm_*
+#include <map>
 //#include <inttypes.h>
 
 
@@ -127,7 +129,7 @@ FBXExporter::FBXExporter (
     : mScene(pScene)
     , mProperties(pProperties)
 {
-    // will probably need to determine UUIDs, connections, etc here.
+    // will probably need to determine UIDs, connections, etc here.
     // basically anything that needs to be known
     // before we start writing sections to the stream.
 }
@@ -281,30 +283,17 @@ void FBXExporter::WriteAllNodes ()
 //FBXHeaderExtension top-level node
 void FBXExporter::WriteHeaderExtension ()
 {
-    std::string node_name = "FBXHeaderExtension";
+    FBX::Node n("FBXHeaderExtension");
     StreamWriterLE outstream(outfile);
     
-    // if writing in binary, need to remember the position here
-    // so we can come back and write the location of the next node.
-    size_t start_loc = outstream.Tell();
-    
-    // placeholder for end offset (we'll come back and write it later)
-    outstream.PutU4(0);
-    
-    // number of properties in this node (uint32)
-    outstream.PutU4(0);
-    
-    // total length of property section in this node (uint32)
-    outstream.PutU4(0);
-    
-    // length of node name (uint8)
-    outstream.PutU1(node_name.size());
-    
-    // node name (unterinated string)
-    outstream.PutString(node_name);
+    // begin node
+    n.Begin(outstream);
     
     // write properties
     // (none)
+    
+    // finish properties
+    n.EndProperties(outstream, 0);
     
     // write child nodes
     WritePropertyNode("FBXHeaderVersion", int32_t(1003), outstream);
@@ -339,14 +328,8 @@ void FBXExporter::WriteHeaderExtension ()
     // so just write an empty node for now.
     sceneinfo.Dump(outstream);
     
-    // write node list terminator block
-    outstream.PutString(NULL_RECORD);
-    
-    // write current position (start of next node) to beginning of node
-    size_t end_loc = outstream.Tell();
-    outstream.Seek(start_loc);
-    outstream.PutU4(end_loc);
-    outstream.Seek(end_loc);
+    // finish node
+    n.End(outstream, true);
     
     // that's it for FBXHeaderExtension...
     
@@ -366,66 +349,465 @@ void FBXExporter::WriteGlobalSettings ()
     gs.AddChild("Version", int32_t(1000));
 
     FBX::Node p("Properties70");
-    p.AddP70I("UpAxis", 1);
-    p.AddP70I("UpAxisSign", 1);
-    p.AddP70I("FrontAxis", 2);
-    p.AddP70I("FrontAxisSign", 1);
-    p.AddP70I("CoordAxis", 0);
-    p.AddP70I("CoordAxisSign", 1);
-    p.AddP70I("OriginalUpAxis", 1);
-    p.AddP70I("OriginalUpAxisSign", 1);
-    p.AddP70D("UnitScaleFactor", 1.0);
-    p.AddP70D("OriginalUnitScaleFactor", 1.0);
-    p.AddP70RGB("AmbientColor", 0.0, 0.0, 0.0);
-    p.AddP70S("DefaultCamera", "Producer Perspective");
-    p.AddP70E("TimeMode", 11);
-    p.AddP70E("TimeProtocol", 2);
-    p.AddP70E("SnapOnFrameMode", 0);
-    p.AddP70T("TimeSpanStart", 0); // ?
-    p.AddP70T("TimeSpanStop", 0); // ?
-    p.AddP70D("CustomFrameRate", -1.0);
-    p.AddP70Compound("TimeMarker"); // not sure what this is
-    p.AddP70I("CurrentTimeMarker", -1);
+    p.AddP70int("UpAxis", 1);
+    p.AddP70int("UpAxisSign", 1);
+    p.AddP70int("FrontAxis", 2);
+    p.AddP70int("FrontAxisSign", 1);
+    p.AddP70int("CoordAxis", 0);
+    p.AddP70int("CoordAxisSign", 1);
+    p.AddP70int("OriginalUpAxis", 1);
+    p.AddP70int("OriginalUpAxisSign", 1);
+    p.AddP70double("UnitScaleFactor", 1.0);
+    p.AddP70double("OriginalUnitScaleFactor", 1.0);
+    p.AddP70color("AmbientColor", 0.0, 0.0, 0.0);
+    p.AddP70string("DefaultCamera", "Producer Perspective");
+    p.AddP70enum("TimeMode", 11);
+    p.AddP70enum("TimeProtocol", 2);
+    p.AddP70enum("SnapOnFrameMode", 0);
+    p.AddP70time("TimeSpanStart", 0); // ?
+    p.AddP70time("TimeSpanStop", 0); // ?
+    p.AddP70double("CustomFrameRate", -1.0);
+    p.AddP70("TimeMarker", "Compound", "", ""); // not sure what this is
+    p.AddP70int("CurrentTimeMarker", -1);
     gs.AddChild(p);
     
-    StreamWriterLE outstream(outfile);
-    gs.Dump(outstream);
+    gs.Dump(outfile);
 }
 
 void FBXExporter::WriteDocuments ()
 {
+    // not sure what the use of multiple documents would be,
+    // or whether any end-appication supports it
+    FBX::Node docs("Documents");
+    docs.AddChild("Count", int32_t(1));
+    FBX::Node doc("Document");
+    
+    // generate uid
+    int64_t uid = generate_uid();
+    doc.AddProperties(uid, "", "Scene");
+    FBX::Node p("Properties70");
+    p.AddP70("SourceObject", "object", "", ""); // what is this even for?
+    p.AddP70string("ActiveAnimStackName", "Take 001"); // should do this properly?
+    doc.AddChild(p);
+    
+    // UID for root node in scene heirarchy.
+    // always set to 0 in the case of a single document.
+    // not sure what happens if more than one document exists.
+    doc.AddChild("RootNode", int64_t(0));
+    
+    docs.AddChild(doc);
+    docs.Dump(outfile);
 }
 
 void FBXExporter::WriteReferences ()
 {
+    // always empty for now.
+    // not really sure what this is for.
+    FBX::Node n("References");
+    n.Dump(outfile);
+}
+
+size_t count_nodes(const aiNode* n) {
+    size_t count = 1;
+    for (size_t i = 0; i < n->mNumChildren; ++i) {
+        count += count_nodes(n->mChildren[i]);
+    }
+    return count;
 }
 
 void FBXExporter::WriteDefinitions ()
 {
+    // basically this is just bookkeeping:
+    // determining how many of each type of object there are
+    // and specifying the base properties to use when otherwise unspecified.
+    
+    // we need to count the objects
+    int32_t count;
+    int32_t total_count = 0;
+    
+    // and store them
+    std::vector<FBX::Node> object_nodes;
+    FBX::Node n, pt, p;
+    
+    // GlobalSettings
+    // this seems to always be here in Maya exports
+    n = FBX::Node("ObjectType", Property("GlobalSettings"));
+    count = 1;
+    n.AddChild("Count", count);
+    object_nodes.push_back(n);
+    total_count += count;
+    
+    // AnimationStack / FbxAnimStack
+    // this seems to always be here in Maya exports
+    count = 1;
+    if (count) {
+        n = FBX::Node("ObjectType", Property("AnimationStack"));
+        n.AddChild("Count", count);
+        pt = FBX::Node("PropertyTemplate", Property("FBXAnimLayer"));
+        p = FBX::Node("Properties70");
+        p.AddP70string("Description", "");
+        p.AddP70time("LocalStart", 0);
+        p.AddP70time("LocalStop", 0);
+        p.AddP70time("ReferenceStart", 0);
+        p.AddP70time("ReferenceStop", 0);
+        pt.AddChild(p);
+        n.AddChild(pt);
+        object_nodes.push_back(n);
+        total_count += count;
+    }
+    
+    // AnimationLayer / FbxAnimLayer
+    // this seems to always be here in Maya exports
+    count = 1;
+    if (count) {
+        n = FBX::Node("ObjectType", Property("AnimationLayer"));
+        n.AddChild("Count", count);
+        pt = FBX::Node("PropertyTemplate", Property("FBXAnimLayer"));
+        p = FBX::Node("Properties70");
+        p.AddP70("Weight", "Number", "", "A", double(100));
+        p.AddP70bool("Mute", 0);
+        p.AddP70bool("Solo", 0);
+        p.AddP70bool("Lock", 0);
+        p.AddP70color("Color", 0.8, 0.8, 0.8);
+        p.AddP70("BlendMode", "enum", "", "", int32_t(0));
+        p.AddP70("RotationAccumulationMode", "enum", "", "", int32_t(0));
+        p.AddP70("ScaleAccumulationMode", "enum", "", "", int32_t(0));
+        p.AddP70("BlendModeBypass", "ULongLong", "", "", int64_t(0));
+        pt.AddChild(p);
+        n.AddChild(pt);
+        object_nodes.push_back(n);
+        total_count += count;
+    }
+    
+    // NodeAttribute / FbxSkeleton
+    // bones are treated specially
+    count = 0;
+    if (count) {
+        n = FBX::Node("ObjectType", Property("NodeAttribute"));
+        n.AddChild("Count", count);
+        pt = FBX::Node("PropertyTemplate", Property("FbxSkeleton"));
+        p = FBX::Node("Properties70");
+        p.AddP70color("Color", 0.8, 0.8, 0.8);
+        p.AddP70double("Size", 100);
+        p.AddP70("LimbLength", "double", "Number", "H", double(1));
+        // note: not sure what the "H" flag is for - hidden?
+        pt.AddChild(p);
+        n.AddChild(pt);
+        object_nodes.push_back(n);
+        total_count += count;
+    }
+    
+    // Model / FbxNode
+    // <~~ node heirarchy
+    count = count_nodes(mScene->mRootNode);
+    if (count) {
+        n = FBX::Node("ObjectType", Property("Model"));
+        n.AddChild("Count", count);
+        pt = FBX::Node("PropertyTemplate", Property("FbxNode"));
+        p = FBX::Node("Properties70");
+        p.AddP70enum("QuaternionInterpolate", 0);
+        p.AddP70vector("RotationOffset", 0.0, 0.0, 0.0);
+        p.AddP70vector("RotationPivot", 0.0, 0.0, 0.0);
+        p.AddP70vector("ScalingOffset", 0.0, 0.0, 0.0);
+        p.AddP70vector("ScalingPivot", 0.0, 0.0, 0.0);
+        p.AddP70bool("TranslationActive", 0);
+        p.AddP70vector("TranslationMin", 0.0, 0.0, 0.0);
+        p.AddP70vector("TranslationMax", 0.0, 0.0, 0.0);
+        p.AddP70bool("TranslationMinX", 0);
+        p.AddP70bool("TranslationMinY", 0);
+        p.AddP70bool("TranslationMinZ", 0);
+        p.AddP70bool("TranslationMaxX", 0);
+        p.AddP70bool("TranslationMaxY", 0);
+        p.AddP70bool("TranslationMaxZ", 0);
+        p.AddP70enum("RotationOrder", 0);
+        p.AddP70bool("RotationSpaceForLimitOnly", 0);
+        p.AddP70double("RotationStiffnessX", 0.0);
+        p.AddP70double("RotationStiffnessY", 0.0);
+        p.AddP70double("RotationStiffnessZ", 0.0);
+        p.AddP70double("AxisLen", 10.0);
+        p.AddP70vector("PreRotation", 0.0, 0.0, 0.0);
+        p.AddP70vector("PostRotation", 0.0, 0.0, 0.0);
+        p.AddP70bool("RotationActive", 0);
+        p.AddP70vector("RotationMin", 0.0, 0.0, 0.0);
+        p.AddP70vector("RotationMax", 0.0, 0.0, 0.0);
+        p.AddP70bool("RotationMinX", 0);
+        p.AddP70bool("RotationMinY", 0);
+        p.AddP70bool("RotationMinZ", 0);
+        p.AddP70bool("RotationMaxX", 0);
+        p.AddP70bool("RotationMaxY", 0);
+        p.AddP70bool("RotationMaxZ", 0);
+        p.AddP70enum("InheritType", 0);
+        p.AddP70bool("ScalingActive", 0);
+        p.AddP70vector("ScalingMin", 0.0, 0.0, 0.0);
+        p.AddP70vector("ScalingMax", 1.0, 1.0, 1.0);
+        p.AddP70bool("ScalingMinX", 0);
+        p.AddP70bool("ScalingMinY", 0);
+        p.AddP70bool("ScalingMinZ", 0);
+        p.AddP70bool("ScalingMaxX", 0);
+        p.AddP70bool("ScalingMaxY", 0);
+        p.AddP70bool("ScalingMaxZ", 0);
+        p.AddP70vector("GeometricTranslation", 0.0, 0.0, 0.0);
+        p.AddP70vector("GeometricRotation", 0.0, 0.0, 0.0);
+        p.AddP70vector("GeometricScaling", 1.0, 1.0, 1.0);
+        p.AddP70double("MinDampRangeX", 0.0);
+        p.AddP70double("MinDampRangeY", 0.0);
+        p.AddP70double("MinDampRangeZ", 0.0);
+        p.AddP70double("MaxDampRangeX", 0.0);
+        p.AddP70double("MaxDampRangeY", 0.0);
+        p.AddP70double("MaxDampRangeZ", 0.0);
+        p.AddP70double("MinDampStrengthX", 0.0);
+        p.AddP70double("MinDampStrengthY", 0.0);
+        p.AddP70double("MinDampStrengthZ", 0.0);
+        p.AddP70double("MaxDampStrengthX", 0.0);
+        p.AddP70double("MaxDampStrengthY", 0.0);
+        p.AddP70double("MaxDampStrengthZ", 0.0);
+        p.AddP70double("PreferedAngleX", 0.0);
+        p.AddP70double("PreferedAngleY", 0.0);
+        p.AddP70double("PreferedAngleZ", 0.0);
+        p.AddP70("LookAtProperty", "object", "", "");
+        p.AddP70("UpVectorProperty", "object", "", "");
+        p.AddP70bool("Show", 1);
+        p.AddP70bool("NegativePercentShapeSupport", 1);
+        p.AddP70int("DefaultAttributeIndex", -1);
+        p.AddP70bool("Freeze", 0);
+        p.AddP70bool("LODBox", 0);
+        p.AddP70("Lcl Translation", "Lcl Translation", "", "A", double(0), double(0), double(0));
+        p.AddP70("Lcl Rotation", "Lcl Rotation", "", "A", double(0), double(0), double(0));
+        p.AddP70("Lcl Scaling", "Lcl Scaling", "", "A", double(1), double(1), double(1));
+        p.AddP70("Visibility", "Visibility", "", "A", double(1));
+        p.AddP70("Visibility Inheritance", "Visibility Inheritance", "", "", int32_t(1));
+        pt.AddChild(p);
+        n.AddChild(pt);
+        object_nodes.push_back(n);
+        total_count += count;
+    }
+    
+    // Geometry / FbxMesh
+    // <~~ aiMesh
+    count = mScene->mNumMeshes;
+    if (count) {
+        n = FBX::Node("ObjectType", Property("Geometry"));
+        n.AddChild("Count", count);
+        pt = FBX::Node("PropertyTemplate", Property("FbxMesh"));
+        p = FBX::Node("Properties70");
+        p.AddP70color("Color", 0, 0, 0);
+        p.AddP70vector("BBoxMin", 0, 0, 0);
+        p.AddP70vector("BBoxMax", 0, 0, 0);
+        p.AddP70bool("Primary Visibility", 1);
+        p.AddP70bool("Casts Shadows", 1);
+        p.AddP70bool("Receive Shadows", 1);
+        pt.AddChild(p);
+        n.AddChild(pt);
+        object_nodes.push_back(n);
+        total_count += count;
+    }
+    
+    // Material / FbxSurfacePhong (etc)
+    // <~~ aiMaterial
+    // just going to basically ignore this for now,
+    // as it's pretty much nonsensical.
+    count = 0;
+    if (count) {
+        n = FBX::Node("ObjectType", Property(""));
+        n.AddChild("Count", count);
+        pt = FBX::Node("PropertyTemplate", Property(""));
+        p = FBX::Node("Properties70");
+        pt.AddChild(p);
+        n.AddChild(pt);
+        object_nodes.push_back(n);
+        total_count += count;
+    }
+    
+    // Texture / FbxFileTexture
+    // <~~ aiTexture
+    
+    // AnimationCurveNode / FbxAnimCurveNode
+    
+    // CollectionExclusive / FbxDisplayLayer
+    
+    // Pose
+    
+    // Deformer
+    
+    // Video / FbxVideo
+    
+    // (template)
+    count = 0;
+    if (count) {
+        n = FBX::Node("ObjectType", Property(""));
+        n.AddChild("Count", count);
+        pt = FBX::Node("PropertyTemplate", Property(""));
+        p = FBX::Node("Properties70");
+        pt.AddChild(p);
+        n.AddChild(pt);
+        object_nodes.push_back(n);
+        total_count += count;
+    }
+    
+    // now write it all
+    FBX::Node defs("Definitions");
+    defs.AddChild("Version", int32_t(100));
+    defs.AddChild("Count", int32_t(total_count));
+    for (auto &n : object_nodes) { defs.AddChild(n); }
+    defs.Dump(outfile);
 }
 
 void FBXExporter::WriteObjects ()
 {
+    // numbers should match those given in definitions! make sure to check
+    StreamWriterLE outstream(outfile);
+    FBX::Node object_node("Objects");
+    object_node.Begin(outstream);
+    object_node.EndProperties(outstream);
+    
+    // geometry (aiMesh)
+    std::vector<int64_t> mesh_uids;
+    for (size_t i = 0; i < mScene->mNumMeshes; ++i) {
+        // it's all about this mesh
+        aiMesh* m = mScene->mMeshes[i];
+        
+        // start the node record
+        FBX::Node n("Geometry");
+        int64_t uid = generate_uid();
+        mesh_uids.push_back(uid);
+        n.AddProperty(uid);
+        n.AddProperty(FBX::SEPARATOR + "Geometry");
+        n.AddProperty("Mesh");
+        n.Begin(outstream);
+        n.DumpProperties(outstream);
+        n.EndProperties(outstream);
+        
+        // output vertex data - each vertex should be unique (probably)
+        std::vector<double> flattened_vertices;
+        // index of original vertex in vertex data vector
+        std::vector<size_t> vertex_indices;
+        // map of vertex value to its index in the data vector
+        std::map<aiVector3D,size_t> index_by_vertex_value;
+        size_t index = 0;
+        for (size_t j = 0; j < m->mNumVertices; ++j) {
+            aiVector3D vtx = m->mVertices[j];
+            auto elem = index_by_vertex_value.find(vtx);
+            if (elem == index_by_vertex_value.end()) {
+                vertex_indices.push_back(index);
+                index_by_vertex_value[vtx] = index;
+                flattened_vertices.push_back(vtx[0]);
+                flattened_vertices.push_back(vtx[1]);
+                flattened_vertices.push_back(vtx[2]);
+                ++index;
+            } else {
+                vertex_indices.push_back(elem->second);
+            }
+        }
+        WritePropertyNode("Vertices", flattened_vertices, outstream);
+        
+        // output polygon data as a flattened array of vertex indices.
+        // the last vertex index of each polygon is negated
+        std::vector<int32_t> polygon_data;
+        for (size_t j = 0; j < m->mNumFaces; ++j) {
+            const aiFace &f = m->mFaces[j];
+            for (size_t k = 0; k < f.mNumIndices - 1; ++k) {
+                polygon_data.push_back(f.mIndices[k]);
+            }
+            polygon_data.push_back(-(int32_t(f.mIndices[f.mNumIndices-1])));
+        }
+        WritePropertyNode("PolygonVertexIndex", polygon_data, outstream);
+        
+        // here should be edges but they're insane.
+        
+        WritePropertyNode("GeometryVersion", int32_t(124), outstream);
+        
+        // finish the node record
+        n.End(outstream, true);
+    }
+    
+    
+    // write nodes (i.e. model heirarchy)
+    // start at root node
+    WriteModelNodes(outstream, mScene->mRootNode, 0, mesh_uids);
+    
+    object_node.End(outstream, true);
+}
+
+void FBXExporter::WriteModelNodes(
+    StreamWriterLE& s,
+    aiNode* node,
+    int64_t parent_uid,
+    std::vector<int64_t>& mesh_uids
+) {
+    int64_t node_uid = 0;
+    // generate uid and connect to parent, if not the root node
+    if (node != mScene->mRootNode) {
+        node_uid = generate_uid();
+        FBX::Node c("C");
+        c.AddProperties("OO", node_uid, parent_uid);
+        connections.push_back(c);
+    }
+    
+    // is this a mesh node?
+    if (node->mNumMeshes == 1) {
+        // connect to child mesh, which should have been written previously
+        FBX::Node c("C");
+        c.AddProperties("OO", mesh_uids[node->mMeshes[0]], node_uid);
+        connections.push_back(c);
+        // write model node
+        FBX::Node m("Model");
+        std::string name = node->mName.C_Str() + FBX::SEPARATOR + "Model";
+        m.AddProperties(node_uid, name, "Mesh");
+        m.AddChild("Version", int32_t(232));
+        // TODO: transform
+        m.Dump(s);
+    } else {
+        FBX::Node m("Model");
+        std::string name = node->mName.C_Str() + FBX::SEPARATOR + "Model";
+        m.AddProperties(node_uid, name, "Null");
+        m.AddChild("Version", int32_t(232));
+        // TODO: transform
+        m.Dump(s);
+    }
+    
+    // if more thanone child mesh, make nodes for each mesh
+    if (node->mNumMeshes > 1) {
+        for (size_t i = 0; i < node->mNumMeshes; ++i) {
+            // make a new model node
+            int64_t new_node_uid = generate_uid();
+            // connect to parent node
+            FBX::Node p("C");
+            p.AddProperties("OO", new_node_uid, node_uid);
+            connections.push_back(p);
+            // connect to child mesh, which should have been written previously
+            FBX::Node c("C");
+            c.AddProperties("OO", mesh_uids[node->mMeshes[0]], new_node_uid);
+            connections.push_back(c);
+            // write model node
+            FBX::Node m("Model");
+            std::string name = mScene->mMeshes[node->mMeshes[i]]->mName.C_Str();
+            name += FBX::SEPARATOR + "Model";
+            m.AddProperties(new_node_uid, name, "Mesh");
+            m.AddChild("Version", int32_t(232));
+            // TODO: transform
+            m.Dump(s);
+        }
+    }
+    
+    // now recurse into children
+    for (size_t i = 0; i < node->mNumChildren; ++i) {
+        WriteModelNodes(s, node->mChildren[i], node_uid, mesh_uids);
+    }
 }
 
 void FBXExporter::WriteConnections ()
 {
+    // we should have completed the connection graph already,
+    // so basically just dump it here
+    FBX::Node conn("Connections");
+    StreamWriterLE outstream(outfile);
+    conn.Begin(outstream);
+    for (auto &n : connections) {
+        n.Dump(outstream);
+    }
+    conn.End(outstream, !connections.empty());
+    connections.clear();
 }
-
-
-void FBX::Node::Begin(
-    Assimp::StreamWriterLE &s
-    ,int32_t numProperties
-){
-    //STUB
-}
-
-void FBX::Node::End(
-    Assimp::StreamWriterLE &s
-){
-    //STUB
-}
-
 
 #endif // ASSIMP_BUILD_NO_FBX_EXPORTER
 #endif // ASSIMP_BUILD_NO_EXPORT

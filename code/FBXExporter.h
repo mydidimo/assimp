@@ -51,6 +51,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "Exceptional.h" // DeadlyExportError
 
 #include <assimp/types.h>
+#include <assimp/ai_assert.h>
 //#include <assimp/material.h>
 
 //#include <sstream>
@@ -63,7 +64,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 using std::unique_ptr;
 
 struct aiScene;
-//struct aiNode;
+struct aiNode;
 //struct aiMaterial;
 
 /*namespace glTF
@@ -81,6 +82,9 @@ namespace FBX
     const std::string NULL_RECORD = { // 13 null bytes
         '\0','\0','\0','\0','\0','\0','\0','\0','\0','\0','\0','\0','\0'
     }; // who knows why
+    const std::string SEPARATOR = {'\x00', '\x01'}; // for use inside strings
+    class Node;
+    class Property;
 }
 
 namespace Assimp
@@ -108,6 +112,12 @@ namespace Assimp
         const ExportProperties* mProperties; // currently unused
         std::shared_ptr<IOStream> outfile; // file to write to
         
+        std::vector<FBX::Node> connections; // conection storage
+        
+        // this crude unique-ID system is actually fine
+        int64_t last_uid = 999999;
+        int64_t generate_uid() { return ++last_uid; }
+        
         // binary files have a specific header and footer,
         // in addition to the actual data
         void WriteBinaryHeader();
@@ -133,6 +143,14 @@ namespace Assimp
         void WriteObjects();
         void WriteConnections();
         // WriteTakes(); // deprecated since at least 2015 (fbx 7.4)
+        
+        // helpers
+        void WriteModelNodes(
+            Assimp::StreamWriterLE& s,
+            aiNode* node,
+            int64_t parent_uid,
+            std::vector<int64_t>& mesh_uids
+        );
     };
 }
 
@@ -201,9 +219,7 @@ namespace FBX
         // for example (const char*) --> (bool)... seriously wtf C++
         template <class T>
         Property(T v) : type('X') {
-            static_assert(std::is_void<T>::value,
-                "TRIED TO CREATE FBX PROPERTY WITH UNSUPPORTED TYPE,"
-                " CHECK YOUR PROPERTY INSTANTIATION");
+            static_assert(std::is_void<T>::value, "TRIED TO CREATE FBX PROPERTY WITH UNSUPPORTED TYPE, CHECK YOUR PROPERTY INSTANTIATION");
         }
         
         size_t size() { return data.size() + 1; } // TODO: array types size()
@@ -212,11 +228,11 @@ namespace FBX
             s.PutU1(type);
             switch (type) {
             case 'C': s.PutU1(*(reinterpret_cast<uint8_t*>(data.data()))); return;
-            case 'Y': s.PutU2(*(reinterpret_cast<int16_t*>(data.data()))); return;
-            case 'I': s.PutU4(*(reinterpret_cast<int32_t*>(data.data()))); return;
-            case 'F': s.PutU4(*(reinterpret_cast<float*>(data.data()))); return;
-            case 'D': s.PutU8(*(reinterpret_cast<double*>(data.data()))); return;
-            case 'L': s.PutU8(*(reinterpret_cast<int64_t*>(data.data()))); return;
+            case 'Y': s.PutI2(*(reinterpret_cast<int16_t*>(data.data()))); return;
+            case 'I': s.PutI4(*(reinterpret_cast<int32_t*>(data.data()))); return;
+            case 'F': s.PutF4(*(reinterpret_cast<float*>(data.data()))); return;
+            case 'D': s.PutF8(*(reinterpret_cast<double*>(data.data()))); return;
+            case 'L': s.PutI8(*(reinterpret_cast<int64_t*>(data.data()))); return;
             case 'S':
                 s.PutU4(data.size());
                 for (size_t i = 0; i < data.size(); ++i) { s.PutU1(data[i]); }
@@ -241,6 +257,7 @@ namespace FBX
     class Node
     {
     public: // constructors
+        Node() = default;
         Node(const std::string& n) : name(n) {}
         Node(const std::string& n, const Property &p)
             : name(n)
@@ -275,72 +292,118 @@ namespace FBX
         }
     public:
         // Properties70 Nodes
-        void AddP70I(const std::string& name, int32_t value) {
+        template <typename... More>
+        void AddP70(
+            const std::string& name,
+            const std::string& type,
+            const std::string& type2,
+            const std::string& flags,
+            More... more
+        ){
+            Node n("P");
+            n.AddProperties(name, type, type2, flags, more...);
+            AddChild(n);
+        }
+        void AddP70int(const std::string& name, int32_t value) {
             Node n("P");
             n.AddProperties(name, "int", "Integer", "", value);
             AddChild(n);
         }
-        void AddP70D(const std::string& name, double value) {
+        void AddP70bool(const std::string& name, bool value) {
+            Node n("P");
+            n.AddProperties(name, "bool", "", "", int32_t(value));
+            AddChild(n);
+        }
+        void AddP70double(const std::string& name, double value) {
             Node n("P");
             n.AddProperties(name, "double", "Number", "", value);
             AddChild(n);
         }
-        void AddP70RGB(const std::string& name, double r, double g, double b) {
+        void AddP70color(const std::string& name, double r, double g, double b) {
             Node n("P");
             n.AddProperties(name, "ColorRGB", "Color", "", r, g, b);
             AddChild(n);
         }
-        void AddP70S(const std::string& name, const std::string& value) {
+        void AddP70vector(const std::string& name, double x, double y, double z) {
+            Node n("P");
+            n.AddProperties(name, "Vector3D", "Vector", "", x, y, z);
+            AddChild(n);
+        }
+        void AddP70string(const std::string& name, const std::string& value) {
             Node n("P");
             n.AddProperties(name, "KString", "", "", value);
             AddChild(n);
         }
-        void AddP70E(const std::string& name, int32_t value) {
+        void AddP70enum(const std::string& name, int32_t value) {
             Node n("P");
             n.AddProperties(name, "enum", "", "", value);
             AddChild(n);
         }
-        void AddP70T(const std::string& name, int64_t value) {
+        void AddP70time(const std::string& name, int64_t value) {
             Node n("P");
             n.AddProperties(name, "KTime", "Time", "", value);
             AddChild(n);
         }
-        void AddP70Compound(const std::string& name) {
-            Node n("P");
-            n.AddProperties(name, "Compound", "", "");
-            AddChild(n);
-        }
     
     public: // member functions
+        void Dump(std::shared_ptr<Assimp::IOStream> outfile) {
+            Assimp::StreamWriterLE outstream(outfile);
+            Dump(outstream);
+        }
         void Dump(Assimp::StreamWriterLE &s) {
+            // write header section (with placeholders for some things)
+            Begin(s);
+            
+            // write properties
+            DumpProperties(s);
+            
+            // go back and fill in property related placeholders
+            EndProperties(s, properties.size());
+            
+            // write children
+            DumpChildren(s);
+            
+            // finish, filling in end offset placeholder
+            End(s, !children.empty());
+        }
+        void Begin(Assimp::StreamWriterLE &s) {
             // remember start pos so we can come back and write the end pos
             start_pos = s.Tell();
             
-            // paceholder end pos because we don't know it yet
-            s.PutU4(0);
+            // placeholders for end pos and property section info
+            s.PutU4(0); // end pos
+            s.PutU4(0); // number of properties
+            s.PutU4(0); // total property section length
             
-            // number of properties
-            s.PutU4(properties.size());
+            // node name
+            s.PutU1(name.size()); // length of node name
+            s.PutString(name); // node name as raw bytes
             
-            // length of property list (bytes)
-            size_t plist_size = 0;
-            for (auto &p : properties) { plist_size += p.size(); }
-            s.PutU4(plist_size);
-            
-            // length of node name
-            s.PutU1(name.size());
-            
-            // node name as raw bytes
-            s.PutString(name);
-            
-            // properties
+            // property data comes after here
+            property_start = s.Tell();
+        }
+        void DumpProperties(Assimp::StreamWriterLE& s) {
             for (auto &p : properties) { p.Dump(s); }
-            
-            // children
+        }
+        void DumpChildren(Assimp::StreamWriterLE& s) {
             for (Node& child : children) { child.Dump(s); }
-            
+        }
+        void EndProperties(Assimp::StreamWriterLE &s) {
+            EndProperties(s, properties.size());
+        }
+        void EndProperties(Assimp::StreamWriterLE &s, size_t num_properties) {
+            if (num_properties == 0) { return; }
+            size_t pos = s.Tell();
+            ai_assert(pos > property_start);
+            size_t property_section_size = pos - property_start;
+            s.Seek(start_pos + 4);
+            s.PutU4(num_properties);
+            s.PutU4(property_section_size);
+            s.Seek(pos);
+        }
+        void End(Assimp::StreamWriterLE &s, bool has_children) {
             // if there were children, add a null record
-            if (children.size() > 0) { s.PutString(NULL_RECORD); }
+            if (has_children) { s.PutString(NULL_RECORD); }
             
             // now go back and write initial pos
             end_pos = s.Tell();
@@ -348,8 +411,6 @@ namespace FBX
             s.PutU4(end_pos);
             s.Seek(end_pos);
         }
-        void Begin(Assimp::StreamWriterLE &s, int32_t numProperties);
-        void End(Assimp::StreamWriterLE &s);
     public:
         std::string name;
         std::vector<Property> properties;
@@ -357,6 +418,7 @@ namespace FBX
     private:
         size_t start_pos; // starting position in stream
         size_t end_pos; // ending position in stream
+        size_t property_start; // starting position of property section
     };
 
     /* convenience function to create a node with a single property,
@@ -370,6 +432,44 @@ namespace FBX
         Property p(value);
         Node node(name, p);
         node.Dump(s);
+    }
+    
+    // convenience function to create and write a property node,
+    // holding a single property which is an array of values.
+    // does not copy the data, so is efficient for large arrays.
+    void WritePropertyNode(
+        const std::string& name,
+        const std::vector<double>& v,
+        Assimp::StreamWriterLE& s
+    ){
+        Node node(name);
+        node.Begin(s);
+        s.PutU1('d');
+        s.PutU4(v.size()); // number of elements
+        s.PutU4(0); // no encoding (1 would be zip-compressed)
+        s.PutU4(v.size() * 8); // data size
+        for (auto it = v.begin(); it != v.end(); ++it) { s.PutF8(*it); }
+        node.EndProperties(s, 1);
+        node.End(s, false);
+    }
+    
+    // convenience function to create and write a property node,
+    // holding a single property which is an array of values.
+    // does not copy the data, so is efficient for large arrays.
+    void WritePropertyNode(
+        const std::string& name,
+        const std::vector<int32_t>& v,
+        Assimp::StreamWriterLE& s
+    ){
+        Node node(name);
+        node.Begin(s);
+        s.PutU1('i');
+        s.PutU4(v.size()); // number of elements
+        s.PutU4(0); // no encoding (1 would be zip-compressed)
+        s.PutU4(v.size() * 4); // data size
+        for (auto it = v.begin(); it != v.end(); ++it) { s.PutI4(*it); }
+        node.EndProperties(s, 1);
+        node.End(s, false);
     }
 }
 
