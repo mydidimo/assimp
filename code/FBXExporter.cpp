@@ -412,6 +412,20 @@ size_t count_nodes(const aiNode* n) {
     return count;
 }
 
+bool has_phong_mat(const aiScene* scene)
+{
+    // just search for any material with a shininess exponent
+    for (size_t i = 0; i < scene->mNumMaterials; ++i) {
+        aiMaterial* mat = scene->mMaterials[i];
+        float shininess = 0;
+        mat->Get(AI_MATKEY_SHININESS, shininess);
+        if (shininess > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void FBXExporter::WriteDefinitions ()
 {
     // basically this is just bookkeeping:
@@ -599,16 +613,48 @@ void FBXExporter::WriteDefinitions ()
         total_count += count;
     }
     
-    // Material / FbxSurfacePhong (etc)
+    // Material / FbxSurfacePhong, FbxSurfaceLambert, FbxSurfaceMaterial
     // <~~ aiMaterial
-    // just going to basically ignore this for now,
-    // as it's pretty much nonsensical.
-    count = 0;
+    // basically if there's any phong material this is defined as phong,
+    // and otherwise lambert.
+    // More complex materials have a bare-bones FbxSurfaceMaterial definition
+    // and are treated specially, as they're not really supported by FBX.
+    count = mScene->mNumMaterials;
     if (count) {
-        n = FBX::Node("ObjectType", Property(""));
+        bool has_phong = has_phong_mat(mScene);
+        n = FBX::Node("ObjectType", Property("Material"));
         n.AddChild("Count", count);
-        pt = FBX::Node("PropertyTemplate", Property(""));
+        pt = FBX::Node("PropertyTemplate");
+        if (has_phong) {
+            pt.AddProperty("FbxSurfacePhong");
+        } else {
+            pt.AddProperty("FbxSurfaceLambert");
+        }
         p = FBX::Node("Properties70");
+        p.AddP70string("ShadingModel", "Phong");
+        p.AddP70bool("MultiLayer", 0);
+        p.AddP70colorA("EmissiveColor", 0.0, 0.0, 0.0);
+        p.AddP70numberA("EmissiveFactor", 1.0);
+        p.AddP70colorA("AmbientColor", 0.2, 0.2, 0.2);
+        p.AddP70numberA("AmbientFactor", 1.0);
+        p.AddP70colorA("DiffuseColor", 0.8, 0.8, 0.8);
+        p.AddP70numberA("DiffuseFactor", 1.0);
+        p.AddP70vector("Bump", 0.0, 0.0, 0.0);
+        p.AddP70vector("NormalMap", 0.0, 0.0, 0.0);
+        p.AddP70double("BumpFactor", 1.0);
+        p.AddP70colorA("TransparentColor", 0.0, 0.0, 0.0);
+        p.AddP70numberA("TransparencyFactor", 0.0);
+        p.AddP70color("DisplacementColor", 0.0, 0.0, 0.0);
+        p.AddP70double("DisplacementFactor", 1.0);
+        p.AddP70color("VectorDisplacementColor", 0.0, 0.0, 0.0);
+        p.AddP70double("VectorDisplacementFactor", 1.0);
+        if (has_phong) {
+            p.AddP70colorA("SpecularColor", 0.2, 0.2, 0.2);
+            p.AddP70numberA("SpecularFactor", 1.0);
+            p.AddP70numberA("ShininessExponent", 20.0);
+            p.AddP70colorA("ReflectionColor", 0.0, 0.0, 0.0);
+            p.AddP70numberA("ReflectionFactor", 1.0);
+        }
         pt.AddChild(p);
         n.AddChild(pt);
         object_nodes.push_back(n);
@@ -724,10 +770,83 @@ void FBXExporter::WriteObjects ()
         n.End(outstream, true);
     }
     
+    // aiMaterial
+    std::vector<int64_t> material_uids;
+    for (size_t i = 0; i < mScene->mNumMaterials; ++i) {
+        // it's all about this material
+        aiMaterial* m = mScene->mMaterials[i];
+        
+        // these are used to recieve material data
+        float f; aiColor3D c;
+        
+        // start the node record
+        FBX::Node n("Material");
+        
+        int64_t uid = generate_uid();
+        material_uids.push_back(uid);
+        n.AddProperty(uid);
+        
+        aiString name;
+        m->Get(AI_MATKEY_NAME, name);
+        n.AddProperty(name.C_Str() + FBX::SEPARATOR + "Material");
+        
+        n.AddProperty("");
+        
+        n.AddChild("Version", int32_t(102));
+        f = 0;
+        m->Get(AI_MATKEY_SHININESS, f);
+        bool phong = (f > 0);
+        if (phong) {
+            n.AddChild("ShadingModel", "phong");
+        } else {
+            n.AddChild("ShadingModel", "lambert");
+        }
+        n.AddChild("MultiLayer", int32_t(0));
+        
+        FBX::Node p("Properties70");
+        
+        // these properties seem duplicated in Maya output.
+        // there is one for animating,
+        // and another for the values...
+        // for now just ignore the animating ones,
+        // as they're problematic anyway.
+        
+        c.r = 0; c.g = 0; c.b = 0;
+        m->Get(AI_MATKEY_COLOR_EMISSIVE, c);
+        p.AddP70vector("Emissive", c.r, c.g, c.b);
+        c.r = 0; c.g = 0; c.b = 0;
+        m->Get(AI_MATKEY_COLOR_AMBIENT, c);
+        p.AddP70vector("Ambient", c.r, c.g, c.b);
+        c.r = 0; c.g = 0; c.b = 0;
+        m->Get(AI_MATKEY_COLOR_DIFFUSE, c);
+        p.AddP70vector("Diffuse", c.r, c.g, c.b);
+        if (phong) {
+            c.r = 0; c.g = 0; c.b = 0;
+            m->Get(AI_MATKEY_COLOR_SPECULAR, c);
+            p.AddP70vector("Specular", c.r, c.g, c.b);
+            f = 0;
+            m->Get(AI_MATKEY_SHININESS, f);
+            p.AddP70double("Shininess", f);
+        }
+        f = 0;
+        m->Get(AI_MATKEY_OPACITY, f);
+        p.AddP70double("Opacity", f);
+        if (phong) {
+            f = 0;
+            m->Get(AI_MATKEY_REFLECTIVITY, f);
+            p.AddP70double("Reflectivity", f);
+        }
+        
+        n.AddChild(p);
+        
+        n.Dump(outstream);
+    }
     
     // write nodes (i.e. model heirarchy)
     // start at root node
-    WriteModelNodes(outstream, mScene->mRootNode, 0, mesh_uids);
+    WriteModelNodes(
+        outstream, mScene->mRootNode, 0, mesh_uids, material_uids
+    );
     
     object_node.End(outstream, true);
 }
@@ -736,7 +855,8 @@ void FBXExporter::WriteModelNodes(
     StreamWriterLE& s,
     aiNode* node,
     int64_t parent_uid,
-    std::vector<int64_t>& mesh_uids
+    std::vector<int64_t>& mesh_uids,
+    std::vector<int64_t>& material_uids
 ) {
     int64_t node_uid = 0;
     // generate uid and connect to parent, if not the root node
@@ -753,34 +873,58 @@ void FBXExporter::WriteModelNodes(
         FBX::Node c("C");
         c.AddProperties("OO", mesh_uids[node->mMeshes[0]], node_uid);
         connections.push_back(c);
+        // also connect to the material for the child mesh
+        c = FBX::Node("C");
+        c.AddProperties(
+            "OO",
+            material_uids[mScene->mMeshes[node->mMeshes[0]]->mMaterialIndex],
+            node_uid
+        );
+        connections.push_back(c);
         // write model node
         FBX::Node m("Model");
         std::string name = node->mName.C_Str() + FBX::SEPARATOR + "Model";
         m.AddProperties(node_uid, name, "Mesh");
         m.AddChild("Version", int32_t(232));
+        FBX::Node p("Properties70");
+        p.AddP70enum("InheritType", 1);
+        m.AddChild(p);
         // TODO: transform
         m.Dump(s);
-    } else {
+    } else if (node != mScene->mRootNode) {
+        // generate a null node so we can add children to it
+        // (the root node is defined implicitly)
         FBX::Node m("Model");
         std::string name = node->mName.C_Str() + FBX::SEPARATOR + "Model";
         m.AddProperties(node_uid, name, "Null");
         m.AddChild("Version", int32_t(232));
+        FBX::Node p("Properties70");
+        p.AddP70enum("InheritType", 1);
+        m.AddChild(p);
         // TODO: transform
         m.Dump(s);
     }
     
-    // if more thanone child mesh, make nodes for each mesh
+    // if more than one child mesh, make nodes for each mesh
     if (node->mNumMeshes > 1) {
         for (size_t i = 0; i < node->mNumMeshes; ++i) {
             // make a new model node
             int64_t new_node_uid = generate_uid();
             // connect to parent node
-            FBX::Node p("C");
-            p.AddProperties("OO", new_node_uid, node_uid);
-            connections.push_back(p);
-            // connect to child mesh, which should have been written previously
             FBX::Node c("C");
-            c.AddProperties("OO", mesh_uids[node->mMeshes[0]], new_node_uid);
+            c.AddProperties("OO", new_node_uid, node_uid);
+            connections.push_back(c);
+            // connect to child mesh, which should have been written previously
+            c = FBX::Node("C");
+            c.AddProperties("OO", mesh_uids[node->mMeshes[i]], new_node_uid);
+            connections.push_back(c);
+            // also connect to the material for the child mesh
+            c = FBX::Node("C");
+            c.AddProperties(
+                "OO",
+                material_uids[mScene->mMeshes[node->mMeshes[i]]->mMaterialIndex],
+                new_node_uid
+            );
             connections.push_back(c);
             // write model node
             FBX::Node m("Model");
@@ -788,6 +932,9 @@ void FBXExporter::WriteModelNodes(
             name += FBX::SEPARATOR + "Model";
             m.AddProperties(new_node_uid, name, "Mesh");
             m.AddChild("Version", int32_t(232));
+            FBX::Node p("Properties70");
+            p.AddP70enum("InheritType", 1);
+            m.AddChild(p);
             // TODO: transform
             m.Dump(s);
         }
@@ -795,7 +942,9 @@ void FBXExporter::WriteModelNodes(
     
     // now recurse into children
     for (size_t i = 0; i < node->mNumChildren; ++i) {
-        WriteModelNodes(s, node->mChildren[i], node_uid, mesh_uids);
+        WriteModelNodes(
+            s, node->mChildren[i], node_uid, mesh_uids, material_uids
+        );
     }
 }
 

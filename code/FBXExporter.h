@@ -149,7 +149,8 @@ namespace Assimp
             Assimp::StreamWriterLE& s,
             aiNode* node,
             int64_t parent_uid,
-            std::vector<int64_t>& mesh_uids
+            std::vector<int64_t>& mesh_uids,
+            std::vector<int64_t>& material_uids
         );
     };
 }
@@ -319,9 +320,19 @@ namespace FBX
             n.AddProperties(name, "double", "Number", "", value);
             AddChild(n);
         }
+        void AddP70numberA(const std::string& name, double value) {
+            Node n("P");
+            n.AddProperties(name, "Number", "", "A", value);
+            AddChild(n);
+        }
         void AddP70color(const std::string& name, double r, double g, double b) {
             Node n("P");
             n.AddProperties(name, "ColorRGB", "Color", "", r, g, b);
+            AddChild(n);
+        }
+        void AddP70colorA(const std::string& name, double r, double g, double b) {
+            Node n("P");
+            n.AddProperties(name, "Color", "", "A", r, g, b);
             AddChild(n);
         }
         void AddP70vector(const std::string& name, double x, double y, double z) {
