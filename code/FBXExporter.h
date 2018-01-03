@@ -67,22 +67,14 @@ struct aiScene;
 struct aiNode;
 //struct aiMaterial;
 
-/*namespace glTF
-{
-    template<class T>
-    class Ref;
-
-    class Asset;
-    struct TexProperty;
-    struct Node;
-}*/
-
 namespace FBX
 {
     const std::string NULL_RECORD = { // 13 null bytes
         '\0','\0','\0','\0','\0','\0','\0','\0','\0','\0','\0','\0','\0'
     }; // who knows why
     const std::string SEPARATOR = {'\x00', '\x01'}; // for use inside strings
+    const std::string MAGIC_NODE_TAG = "_$AssimpFbx$"; // from import
+    
     class Node;
     class Property;
     
@@ -174,6 +166,14 @@ namespace Assimp
             int64_t parent_uid,
             std::vector<int64_t>& mesh_uids,
             std::vector<int64_t>& material_uids
+        );
+        void WriteModelNodes( // usually don't call this directly
+            StreamWriterLE& s,
+            aiNode* node,
+            int64_t parent_uid,
+            std::vector<int64_t>& mesh_uids,
+            std::vector<int64_t>& material_uids,
+            std::vector<std::pair<std::string,aiVector3D>>& transform_chain
         );
     };
 }

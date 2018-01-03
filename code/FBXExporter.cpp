@@ -73,6 +73,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // https://code.blender.org/2013/08/fbx-binary-file-format-specification/
 // https://wiki.blender.org/index.php/User:Mont29/Foundation/FBX_File_Structure
 
+constexpr double DEG = 360.0 / 6.283185307179586476925286766559;
 
 // FBX files have some hashed values that depend on the creation time field,
 // but for now we don't actually know how to generate these.
@@ -984,12 +985,32 @@ void FBXExporter::WriteObjects ()
     object_node.End(outstream, true);
 }
 
+// convenience map of magic node name strings to FBX properties,
+// including the expected type of transform.
+const std::map<std::string,std::pair<std::string,char>> transform_types = {
+    {"Translation", {"Lcl Translation", 't'}},
+    {"RotationOffset", {"RotationOffset", 't'}},
+    {"RotationPivot", {"RotationPivot", 't'}},
+    {"PreRotation", {"PreRotation", 'r'}},
+    {"Rotation", {"Lcl Rotation", 'r'}},
+    {"PostRotation", {"PostRotation", 'r'}},
+    {"RotationPivotInverse", {"RotationPivotInverse", 'i'}},
+    {"ScalingOffset", {"ScalingOffset", 't'}},
+    {"ScalingPivot", {"ScalingPivot", 't'}},
+    {"Scaling", {"Lcl Scaling", 's'}},
+    {"ScalingPivotInverse", {"ScalingPivotInverse", 'i'}},
+    {"GeometricScaling", {"GeometricScaling", 's'}},
+    {"GeometricRotation", {"GeometricRotation", 'r'}},
+    {"GeometricTranslation", {"GeometricTranslation", 't'}}
+};
+
 // write a single model node to the stream
 void WriteModelNode(
     StreamWriterLE& outstream,
     aiNode* node,
     int64_t node_uid,
     const std::string& type,
+    const std::vector<std::pair<std::string,aiVector3D>>& transform_chain,
     TransformInheritance inherit_type=TransformInheritance_RSrs
 ){
     const aiVector3D zero = {0, 0, 0};
@@ -999,27 +1020,53 @@ void WriteModelNode(
     m.AddProperties(node_uid, name, type);
     m.AddChild("Version", int32_t(232));
     FBX::Node p("Properties70");
+    p.AddP70bool("RotationActive", 1);
     p.AddP70enum("InheritType", inherit_type);
-    // decompose 4x4 transform matrix into TRS
-    aiVector3D t, r, s;
-    node->mTransformation.Decompose(s, r, t);
-    if (t != zero) {
-        p.AddP70(
-            "Lcl Translation", "Lcl Translation", "", "A",
-            double(t.x), double(t.y), double(t.z)
-        );
-    }
-    if (r != zero) {
-        p.AddP70(
-            "Lcl Rotation", "Lcl Rotation", "", "A",
-            double(r.x), double(r.y), double(r.z)
-        );
-    }
-    if (s != one) {
-        p.AddP70(
-            "Lcl Scaling", "Lcl Scaling", "", "A",
-            double(s.x), double(s.y), double(s.z)
-        );
+    if (transform_chain.empty()) {
+        // decompose 4x4 transform matrix into TRS
+        aiVector3D t, r, s;
+        node->mTransformation.Decompose(s, r, t);
+        if (t != zero) {
+            p.AddP70(
+                "Lcl Translation", "Lcl Translation", "", "A",
+                double(t.x), double(t.y), double(t.z)
+            );
+        }
+        if (r != zero) {
+            p.AddP70(
+                "Lcl Rotation", "Lcl Rotation", "", "A",
+                double(DEG*r.x), double(DEG*r.y), double(DEG*r.z)
+            );
+        }
+        if (s != one) {
+            p.AddP70(
+                "Lcl Scaling", "Lcl Scaling", "", "A",
+                double(s.x), double(s.y), double(s.z)
+            );
+        }
+    } else {
+        // apply the transformation chain
+        for (auto &item : transform_chain) {
+            auto elem = transform_types.find(item.first);
+            if (elem == transform_types.end()) {
+                // then this is a bug
+                std::stringstream err;
+                err << "unrecognized FBX transformation type: ";
+                err << item.first;
+                throw DeadlyExportError(err.str());
+            }
+            const std::string &name = elem->second.first;
+            const aiVector3D &v = item.second;
+            if (name.compare(0, 4, "Lcl ") == 0) {
+                // special handling for animatable properties
+                p.AddP70(
+                    name, name, "", "A",
+                    double(v.x), double(v.y), double(v.z)
+                );
+            } else {
+                p.AddP70vector(name, v.x, v.y, v.z);
+            }
+        }
     }
     m.AddChild(p);
     
@@ -1031,6 +1078,7 @@ void WriteModelNode(
     m.Dump(outstream);
 }
 
+// wrapper for WriteModelNodes to create and pass a blank transform chain
 void FBXExporter::WriteModelNodes(
     StreamWriterLE& s,
     aiNode* node,
@@ -1038,6 +1086,71 @@ void FBXExporter::WriteModelNodes(
     std::vector<int64_t>& mesh_uids,
     std::vector<int64_t>& material_uids
 ) {
+    std::vector<std::pair<std::string,aiVector3D>> chain;
+    WriteModelNodes(s, node, parent_uid, mesh_uids, material_uids, chain);
+}
+
+void FBXExporter::WriteModelNodes(
+    StreamWriterLE& outstream,
+    aiNode* node,
+    int64_t parent_uid,
+    std::vector<int64_t>& mesh_uids,
+    std::vector<int64_t>& material_uids,
+    std::vector<std::pair<std::string,aiVector3D>>& transform_chain
+) {
+    // first collapse any expanded transformation chains created by FBX import.
+    std::string node_name(node->mName.C_Str());
+    if (node_name.find(MAGIC_NODE_TAG) != std::string::npos) {
+        if (node->mNumChildren != 1) {
+            // this should never happen
+            std::stringstream err;
+            err << "FBX transformation node should have 1 child,";
+            err << " but " << node->mNumChildren << " found";
+            err << " on node \"" << node_name << "\"!";
+            throw DeadlyExportError(err.str());
+        }
+        aiNode* next_node = node->mChildren[0];
+        auto pos = node_name.find(MAGIC_NODE_TAG) + MAGIC_NODE_TAG.size() + 1;
+        std::string type_name = node_name.substr(pos);
+        auto elem = transform_types.find(type_name);
+        if (elem == transform_types.end()) {
+            // then this is a bug and should be fixed
+            std::stringstream err;
+            err << "unrecognized FBX transformation node";
+            err << " of type " << type_name << " in node " << node_name;
+            throw DeadlyExportError(err.str());
+        }
+        aiVector3D t, r, s;
+        node->mTransformation.Decompose(s, r, t);
+        switch (elem->second.second) {
+        case 'i': // inverse
+            // we don't need to worry about the inverse matrices
+            break;
+        case 't': // translation
+            transform_chain.emplace_back(elem->first, t);
+            break;
+        case 'r': // rotation
+            r *= DEG;
+            transform_chain.emplace_back(elem->first, r);
+            break;
+        case 's': // scale
+            transform_chain.emplace_back(elem->first, s);
+            break;
+        default:
+            // this should never happen
+            std::stringstream err;
+            err << "unrecognized FBX transformation type code: ";
+            err << elem->second.second;
+            throw DeadlyExportError(err.str());
+        }
+        // now just continue to the next node
+        WriteModelNodes(
+            outstream, next_node, parent_uid, mesh_uids, material_uids,
+            transform_chain
+        );
+        return;
+    }
+    
     int64_t node_uid = 0;
     // generate uid and connect to parent, if not the root node
     if (node != mScene->mRootNode) {
@@ -1064,10 +1177,10 @@ void FBXExporter::WriteModelNodes(
         );
         connections.push_back(c);
         // write model node
-        WriteModelNode(s, node, node_uid, "Mesh");
+        WriteModelNode(outstream, node, node_uid, "Mesh", transform_chain);
     } else {
         // generate a null node so we can add children to it
-        WriteModelNode(s, node, node_uid, "Null");
+        WriteModelNode(outstream, node, node_uid, "Null", transform_chain);
     }
     
     // if more than one child mesh, make nodes for each mesh
@@ -1101,14 +1214,14 @@ void FBXExporter::WriteModelNodes(
             FBX::Node p("Properties70");
             p.AddP70enum("InheritType", 1);
             m.AddChild(p);
-            m.Dump(s);
+            m.Dump(outstream);
         }
     }
     
     // now recurse into children
     for (size_t i = 0; i < node->mNumChildren; ++i) {
         WriteModelNodes(
-            s, node->mChildren[i], node_uid, mesh_uids, material_uids
+            outstream, node->mChildren[i], node_uid, mesh_uids, material_uids
         );
     }
 }
