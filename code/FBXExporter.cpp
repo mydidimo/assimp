@@ -55,6 +55,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assimp/version.h>
 #include <assimp/IOSystem.hpp>
 #include <assimp/Exporter.hpp>
+#include <assimp/DefaultLogger.hpp>
 //#include <assimp/material.h>
 #include <assimp/scene.h>
 #include <assimp/mesh.h>
@@ -705,9 +706,9 @@ void FBXExporter::WriteObjects ()
     
     // geometry (aiMesh)
     std::vector<int64_t> mesh_uids;
-    for (size_t i = 0; i < mScene->mNumMeshes; ++i) {
+    for (size_t mi = 0; mi < mScene->mNumMeshes; ++mi) {
         // it's all about this mesh
-        aiMesh* m = mScene->mMeshes[i];
+        aiMesh* m = mScene->mMeshes[mi];
         
         // start the node record
         FBX::Node n("Geometry");
@@ -727,8 +728,8 @@ void FBXExporter::WriteObjects ()
         // map of vertex value to its index in the data vector
         std::map<aiVector3D,size_t> index_by_vertex_value;
         size_t index = 0;
-        for (size_t j = 0; j < m->mNumVertices; ++j) {
-            aiVector3D vtx = m->mVertices[j];
+        for (size_t vi = 0; vi < m->mNumVertices; ++vi) {
+            aiVector3D vtx = m->mVertices[vi];
             auto elem = index_by_vertex_value.find(vtx);
             if (elem == index_by_vertex_value.end()) {
                 vertex_indices.push_back(index);
@@ -746,10 +747,10 @@ void FBXExporter::WriteObjects ()
         // output polygon data as a flattened array of vertex indices.
         // the last vertex index of each polygon is negated and - 1
         std::vector<int32_t> polygon_data;
-        for (size_t j = 0; j < m->mNumFaces; ++j) {
-            const aiFace &f = m->mFaces[j];
-            for (size_t k = 0; k < f.mNumIndices - 1; ++k) {
-                polygon_data.push_back(vertex_indices[f.mIndices[k]]);
+        for (size_t fi = 0; fi < m->mNumFaces; ++fi) {
+            const aiFace &f = m->mFaces[fi];
+            for (size_t pvi = 0; pvi < f.mNumIndices - 1; ++pvi) {
+                polygon_data.push_back(vertex_indices[f.mIndices[pvi]]);
             }
             polygon_data.push_back(-1 - vertex_indices[f.mIndices[f.mNumIndices-1]]);
         }
@@ -760,11 +761,113 @@ void FBXExporter::WriteObjects ()
         
         WritePropertyNode("GeometryVersion", int32_t(124), outstream);
         
-        // here should be normals, UVs etc.
-        // they're added as "layers".
+        // normals, if any
+        if (m->HasNormals()) {
+            FBX::Node normals("LayerElementNormal", Property(int32_t(0)));
+            normals.Begin(outstream);
+            normals.DumpProperties(outstream);
+            normals.EndProperties(outstream);
+            WritePropertyNode("Version", int32_t(102), outstream);
+            WritePropertyNode("Name", "", outstream);
+            WritePropertyNode("MappingInformationType", "ByPolygonVertex", outstream);
+            // TODO: vertex-normals or indexed normals when appropriate
+            WritePropertyNode("ReferenceInformationType", "Direct", outstream);
+            std::vector<double> normal_data;
+            normal_data.reserve(3 * polygon_data.size());
+            for (size_t fi = 0; fi < m->mNumFaces; ++fi) {
+                const aiFace &f = m->mFaces[fi];
+                for (size_t pvi = 0; pvi < f.mNumIndices; ++pvi) {
+                    const aiVector3D &n = m->mNormals[f.mIndices[pvi]];
+                    normal_data.push_back(n.x);
+                    normal_data.push_back(n.y);
+                    normal_data.push_back(n.z);
+                }
+            }
+            WritePropertyNode("Normals", normal_data, outstream);
+            normals.End(outstream, true);
+        }
+        
+        // uvs, if any
+        for (size_t uvi = 0; uvi < m->GetNumUVChannels(); ++uvi) {
+            if (m->mNumUVComponents[uvi] > 2) {
+                // FBX only supports 2-channel UV maps...
+                // or at least i'm not sure how to indicate a different number
+                std::stringstream err;
+                err << "Only 2-channel UV maps supported by FBX,";
+                err << " but mesh " << mi;
+                if (m->mName.length) { err << " (" << m->mName.C_Str() << ")"; }
+                err << " UV map " << uvi << " has " << m->mNumUVComponents[uvi];
+                err << " components! Data will be preserved,";
+                err << " but may be incorrectly interpreted on load.";
+                DefaultLogger::get()->warn(err.str());
+            }
+            FBX::Node uv("LayerElementUV", Property(int32_t(uvi)));
+            uv.Begin(outstream);
+            uv.DumpProperties(outstream);
+            uv.EndProperties(outstream);
+            WritePropertyNode("Version", int32_t(101), outstream);
+            // it doesn't seem like assimp keeps the uv map name,
+            // so just leave it blank.
+            WritePropertyNode("Name", "", outstream);
+            WritePropertyNode("MappingInformationType", "ByPolygonVertex", outstream);
+            WritePropertyNode("ReferenceInformationType", "IndexToDirect", outstream);
+            
+            std::vector<double> uv_data;
+            std::vector<int32_t> uv_indices;
+            std::map<aiVector3D,int32_t> index_by_uv;
+            size_t index = 0;
+            for (size_t fi = 0; fi < m->mNumFaces; ++fi) {
+                const aiFace &f = m->mFaces[fi];
+                for (size_t pvi = 0; pvi < f.mNumIndices - 1; ++pvi) {
+                    const aiVector3D &uv = m->mTextureCoords[uvi][f.mIndices[pvi]];
+                    auto elem = index_by_uv.find(uv);
+                    if (elem == index_by_uv.end()) {
+                        index_by_uv[uv] = index;
+                        uv_indices.push_back(index);
+                        for (size_t x = 0; x < m->mNumUVComponents[uvi]; ++x) {
+                            uv_data.push_back(uv[x]);
+                        }
+                        ++index;
+                    } else {
+                        uv_indices.push_back(elem->second);
+                    }
+                }
+            }
+            WritePropertyNode("UV", uv_data, outstream);
+            WritePropertyNode("UVIndex", uv_indices, outstream);
+            uv.End(outstream, true);
+        }
+        
+        // i'm not really sure why this material section exists,
+        // as the material is linked via "Connections".
+        // it seems to always have the same "0" value.
+        FBX::Node mat("LayerElementMaterial", Property(int32_t(0)));
+        mat.AddChild("Version", int32_t(101));
+        mat.AddChild("Name", "");
+        mat.AddChild("MappingInformationType", "AllSame");
+        mat.AddChild("RefereneInformationType", "IndexToDirect");
+        std::vector<int32_t> mat_indices = {0};
+        mat.AddChild("Materials", mat_indices);
+        mat.Dump(outstream);
         
         // finally we have the layer specifications,
         // which select the normals / UV set / etc to use.
+        // TODO: handle multiple uv sets correctly?
+        FBX::Node layer("Layer", Property(int32_t(0)));
+        layer.AddChild("Version", int32_t(100));
+        FBX::Node le("LayerElement");
+        le.AddChild("Type", "LayerElementNormal");
+        le.AddChild("TypedIndex", int32_t(0));
+        layer.AddChild(le);
+        le = FBX::Node("LayerElement");
+        le.AddChild("Type", "LayerElementMaterial");
+        le.AddChild("TypedIndex", int32_t(0));
+        layer.AddChild(le);
+        le = FBX::Node("LayerElement");
+        le.AddChild("Type", "LayerElementUV");
+        le.AddChild("TypedIndex", int32_t(0));
+        layer.AddChild(le);
+        layer.Dump(outstream);
         
         // finish the node record
         n.End(outstream, true);
@@ -805,12 +908,44 @@ void FBXExporter::WriteObjects ()
         
         FBX::Node p("Properties70");
         
-        // these properties seem duplicated in Maya output.
-        // there is one for animating,
-        // and another for the values...
-        // for now just ignore the animating ones,
-        // as they're problematic anyway.
+        // materials are weird, with a lot of duplicated fields.
+        // i can only assume some applications use one,
+        // while other applications use the other.
         
+        // the ones from the propertytemplate are probably the "correct" ones.
+        
+        // first the animating ones
+        c.r = 0; c.g = 0; c.b = 0;
+        m->Get(AI_MATKEY_COLOR_AMBIENT, c);
+        p.AddP70colorA("AmbientColor", c.r, c.g, c.b);
+        c.r = 0; c.g = 0; c.b = 0;
+        m->Get(AI_MATKEY_COLOR_DIFFUSE, c);
+        p.AddP70colorA("DiffuseColor", c.r, c.g, c.b);
+        // normally FBX files from Maya have a DiffuseFactor of 0.8,
+        // but we don't store this information
+        // so leave it at the default 1.0.
+        //p.AddP70numberA("DiffuseFactor", 1.0);
+        // TransparencyFactor seems to be opacity? TODO: verify
+        f = 0;
+        m->Get(AI_MATKEY_OPACITY, f);
+        p.AddP70numberA("TransparencyFactor", f);
+        if (phong) {
+            c.r = 0; c.g = 0; c.b = 0;
+            m->Get(AI_MATKEY_COLOR_SPECULAR, c);
+            p.AddP70colorA("SpecularColor", c.r, c.g, c.b);
+            f = 0;
+            m->Get(AI_MATKEY_SHININESS, f);
+            p.AddP70numberA("ShininessExponent", f);
+            // is this actually the reflectivity?
+            // it seems different in my examples, and we don't import it...
+            // TODO: investigate
+            //f = 0;
+            //m->Get(AI_MATKEY_REFLECTIVITY, f);
+            //p.AddP70numberA("ReflectionFactor", f);
+        }
+        
+        // now the non-animating ones - perhaps a legacy system?
+        // for safety let's include it.
         c.r = 0; c.g = 0; c.b = 0;
         m->Get(AI_MATKEY_COLOR_EMISSIVE, c);
         p.AddP70vector("Emissive", c.r, c.g, c.b);
@@ -820,6 +955,9 @@ void FBXExporter::WriteObjects ()
         c.r = 0; c.g = 0; c.b = 0;
         m->Get(AI_MATKEY_COLOR_DIFFUSE, c);
         p.AddP70vector("Diffuse", c.r, c.g, c.b);
+        f = 0;
+        m->Get(AI_MATKEY_OPACITY, f);
+        p.AddP70double("Opacity", f);
         if (phong) {
             c.r = 0; c.g = 0; c.b = 0;
             m->Get(AI_MATKEY_COLOR_SPECULAR, c);
@@ -827,11 +965,6 @@ void FBXExporter::WriteObjects ()
             f = 0;
             m->Get(AI_MATKEY_SHININESS, f);
             p.AddP70double("Shininess", f);
-        }
-        f = 0;
-        m->Get(AI_MATKEY_OPACITY, f);
-        p.AddP70double("Opacity", f);
-        if (phong) {
             f = 0;
             m->Get(AI_MATKEY_REFLECTIVITY, f);
             p.AddP70double("Reflectivity", f);
@@ -851,6 +984,53 @@ void FBXExporter::WriteObjects ()
     object_node.End(outstream, true);
 }
 
+// write a single model node to the stream
+void WriteModelNode(
+    StreamWriterLE& outstream,
+    aiNode* node,
+    int64_t node_uid,
+    const std::string& type,
+    TransformInheritance inherit_type=TransformInheritance_RSrs
+){
+    const aiVector3D zero = {0, 0, 0};
+    const aiVector3D one = {1, 1, 1};
+    FBX::Node m("Model");
+    std::string name = node->mName.C_Str() + FBX::SEPARATOR + "Model";
+    m.AddProperties(node_uid, name, type);
+    m.AddChild("Version", int32_t(232));
+    FBX::Node p("Properties70");
+    p.AddP70enum("InheritType", inherit_type);
+    // decompose 4x4 transform matrix into TRS
+    aiVector3D t, r, s;
+    node->mTransformation.Decompose(s, r, t);
+    if (t != zero) {
+        p.AddP70(
+            "Lcl Translation", "Lcl Translation", "", "A",
+            double(t.x), double(t.y), double(t.z)
+        );
+    }
+    if (r != zero) {
+        p.AddP70(
+            "Lcl Rotation", "Lcl Rotation", "", "A",
+            double(r.x), double(r.y), double(r.z)
+        );
+    }
+    if (s != one) {
+        p.AddP70(
+            "Lcl Scaling", "Lcl Scaling", "", "A",
+            double(s.x), double(s.y), double(s.z)
+        );
+    }
+    m.AddChild(p);
+    
+    // not sure what these are for,
+    // but they seem to be omnipresent
+    m.AddChild("Shading", Property(true));
+    m.AddChild("Culling", Property("CullingOff"));
+    
+    m.Dump(outstream);
+}
+
 void FBXExporter::WriteModelNodes(
     StreamWriterLE& s,
     aiNode* node,
@@ -868,7 +1048,9 @@ void FBXExporter::WriteModelNodes(
     }
     
     // is this a mesh node?
-    if (node->mNumMeshes == 1) {
+    if (node == mScene->mRootNode) {
+        // handled later
+    } else if (node->mNumMeshes == 1) {
         // connect to child mesh, which should have been written previously
         FBX::Node c("C");
         c.AddProperties("OO", mesh_uids[node->mMeshes[0]], node_uid);
@@ -882,31 +1064,14 @@ void FBXExporter::WriteModelNodes(
         );
         connections.push_back(c);
         // write model node
-        FBX::Node m("Model");
-        std::string name = node->mName.C_Str() + FBX::SEPARATOR + "Model";
-        m.AddProperties(node_uid, name, "Mesh");
-        m.AddChild("Version", int32_t(232));
-        FBX::Node p("Properties70");
-        p.AddP70enum("InheritType", 1);
-        m.AddChild(p);
-        // TODO: transform
-        m.Dump(s);
-    } else if (node != mScene->mRootNode) {
+        WriteModelNode(s, node, node_uid, "Mesh");
+    } else {
         // generate a null node so we can add children to it
-        // (the root node is defined implicitly)
-        FBX::Node m("Model");
-        std::string name = node->mName.C_Str() + FBX::SEPARATOR + "Model";
-        m.AddProperties(node_uid, name, "Null");
-        m.AddChild("Version", int32_t(232));
-        FBX::Node p("Properties70");
-        p.AddP70enum("InheritType", 1);
-        m.AddChild(p);
-        // TODO: transform
-        m.Dump(s);
+        WriteModelNode(s, node, node_uid, "Null");
     }
     
     // if more than one child mesh, make nodes for each mesh
-    if (node->mNumMeshes > 1) {
+    if (node->mNumMeshes > 1 || node == mScene->mRootNode) {
         for (size_t i = 0; i < node->mNumMeshes; ++i) {
             // make a new model node
             int64_t new_node_uid = generate_uid();
@@ -928,6 +1093,7 @@ void FBXExporter::WriteModelNodes(
             connections.push_back(c);
             // write model node
             FBX::Node m("Model");
+            // take name from mesh name, if it exists
             std::string name = mScene->mMeshes[node->mMeshes[i]]->mName.C_Str();
             name += FBX::SEPARATOR + "Model";
             m.AddProperties(new_node_uid, name, "Mesh");
@@ -935,7 +1101,6 @@ void FBXExporter::WriteModelNodes(
             FBX::Node p("Properties70");
             p.AddP70enum("InheritType", 1);
             m.AddChild(p);
-            // TODO: transform
             m.Dump(s);
         }
     }

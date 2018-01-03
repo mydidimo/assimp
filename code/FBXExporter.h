@@ -85,6 +85,29 @@ namespace FBX
     const std::string SEPARATOR = {'\x00', '\x01'}; // for use inside strings
     class Node;
     class Property;
+    
+    // rotation order. We'll probably use EulerXYZ for everything
+    enum RotOrder {
+        RotOrder_EulerXYZ = 0,
+        RotOrder_EulerXZY,
+        RotOrder_EulerYZX,
+        RotOrder_EulerYXZ,
+        RotOrder_EulerZXY,
+        RotOrder_EulerZYX,
+
+        RotOrder_SphericXYZ,
+
+        RotOrder_MAX // end-of-enum sentinel
+    };
+
+    // transformation inheritance method. Most of the time RSrs
+    enum TransformInheritance {
+        TransformInheritance_RrSs = 0,
+        TransformInheritance_RSrs,
+        TransformInheritance_Rrs,
+
+        TransformInheritance_MAX // end-of-enum sentinel
+    };
 }
 
 namespace Assimp
@@ -212,14 +235,26 @@ namespace FBX
                 data[i] = uint8_t(s[i]);
             }
         }
-        explicit Property(const std::vector<uint8_t>& r) : type('R'), data(r) {}
-        // TODO: array types
+        explicit Property(const std::vector<uint8_t>& r)
+            : type('R'), data(r) {}
+        explicit Property(const std::vector<int32_t>& va)
+            : type('i'), data(4*va.size())
+        {
+            int32_t* d = reinterpret_cast<int32_t*>(data.data());
+            for (size_t i = 0; i < va.size(); ++i) { d[i] = va[i]; }
+        }
+        explicit Property(const std::vector<double>& va)
+            : type('d'), data(8*va.size())
+        {
+            double* d = reinterpret_cast<double*>(data.data());
+            for (size_t i = 0; i < va.size(); ++i) { d[i] = va[i]; }
+        }
         
         // this will catch any type not defined above,
         // so that we don't accidentally convert something we don't want.
         // for example (const char*) --> (bool)... seriously wtf C++
         template <class T>
-        Property(T v) : type('X') {
+        explicit Property(T v) : type('X') {
             static_assert(std::is_void<T>::value, "TRIED TO CREATE FBX PROPERTY WITH UNSUPPORTED TYPE, CHECK YOUR PROPERTY INSTANTIATION");
         }
         
@@ -227,6 +262,8 @@ namespace FBX
         
         void Dump(Assimp::StreamWriterLE &s) {
             s.PutU1(type);
+            uint8_t* d;
+            size_t N;
             switch (type) {
             case 'C': s.PutU1(*(reinterpret_cast<uint8_t*>(data.data()))); return;
             case 'Y': s.PutI2(*(reinterpret_cast<int16_t*>(data.data()))); return;
@@ -235,12 +272,29 @@ namespace FBX
             case 'D': s.PutF8(*(reinterpret_cast<double*>(data.data()))); return;
             case 'L': s.PutI8(*(reinterpret_cast<int64_t*>(data.data()))); return;
             case 'S':
-                s.PutU4(data.size());
-                for (size_t i = 0; i < data.size(); ++i) { s.PutU1(data[i]); }
-                return;
             case 'R':
                 s.PutU4(data.size());
                 for (size_t i = 0; i < data.size(); ++i) { s.PutU1(data[i]); }
+                return;
+            case 'i':
+                N = data.size() / 4;
+                s.PutU4(N); // number of elements
+                s.PutU4(0); // no encoding (1 would be zip-compressed)
+                s.PutU4(data.size()); // data size
+                d = data.data();
+                for (size_t i = 0; i < N; ++i) {
+                    s.PutI4((reinterpret_cast<int32_t*>(d))[i]);
+                }
+                return;
+            case 'd':
+                N = data.size() / 8;
+                s.PutU4(N); // number of elements
+                s.PutU4(0); // no encoding (1 would be zip-compressed)
+                s.PutU4(data.size()); // data size
+                d = data.data();
+                for (size_t i = 0; i < N; ++i) {
+                    s.PutF8((reinterpret_cast<double*>(d))[i]);
+                }
                 return;
             default:
                 std::stringstream err;
