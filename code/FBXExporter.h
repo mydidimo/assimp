@@ -54,7 +54,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assimp/ai_assert.h>
 //#include <assimp/material.h>
 
-//#include <sstream>
 #include <vector>
 //#include <map>
 #include <memory> // shared_ptr
@@ -338,12 +337,14 @@ namespace FBX
         void AddChild(const Node& node) { children.push_back(node); }
         
         // convenience function to add a child node with a single property
-        template <typename T>
+        template <typename... More>
         void AddChild(
             const std::string& name,
-            T value
+            More... more
         ){
-            children.emplace_back(name, Property(value));
+            FBX::Node c(name);
+            c.AddProperties(more...);
+            children.push_back(c);
         }
     public:
         // Properties70 Nodes
@@ -392,6 +393,11 @@ namespace FBX
         void AddP70vector(const std::string& name, double x, double y, double z) {
             Node n("P");
             n.AddProperties(name, "Vector3D", "Vector", "", x, y, z);
+            AddChild(n);
+        }
+        void AddP70vectorA(const std::string& name, double x, double y, double z) {
+            Node n("P");
+            n.AddProperties(name, "Vector", "", "A", x, y, z);
             AddChild(n);
         }
         void AddP70string(const std::string& name, const std::string& value) {

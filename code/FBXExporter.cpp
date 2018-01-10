@@ -75,13 +75,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 constexpr double DEG = 360.0 / 6.283185307179586476925286766559;
 
-// FBX files have some hashed values that depend on the creation time field,
-// but for now we don't actually know how to generate these.
-// what we can do is set them to a known-working version.
-// this is the data that Blender uses in their FBX export process.
+// some constants that we'll use for writing metadata
 namespace FBX {
     const std::string EXPORT_VERSION_STR = "7.4.0";
     const uint32_t EXPORT_VERSION_INT = 7400; // 7.4 == 2014/2015
+    // FBX files have some hashed values that depend on the creation time field,
+    // but for now we don't actually know how to generate these.
+    // what we can do is set them to a known-working version.
+    // this is the data that Blender uses in their FBX export process.
     const std::string GENERIC_CTIME = "1970-01-01 10:00:00:000";
     const std::string GENERIC_FILEID = "\x28\xb3\x2a\xeb\xb6\x24\xcc\xc2\xbf\xc8\xb0\x2a\xa9\x2b\xfc\xf1";
     const std::string GENERIC_FOOTID = "\xfa\xbc\xab\x09\xd0\xc8\xd4\x66\xb1\x76\xfb\x83\x1c\xf7\x26\x7e";
@@ -428,6 +429,27 @@ bool has_phong_mat(const aiScene* scene)
     return false;
 }
 
+size_t count_textures(const aiScene* scene) {
+    size_t count = 0;
+    // TODO: embedded textures
+    //count += scene->mNumTextures;
+    for (size_t i = 0; i < scene->mNumMaterials; ++i) {
+        aiMaterial* mat = scene->mMaterials[i];
+        for (
+            size_t tt = aiTextureType_DIFFUSE;
+            tt < aiTextureType_UNKNOWN;
+            ++tt
+        ){
+            // FIXME: handle unsupported texture types
+            // FIXME: handle duplicated textures
+            if (mat->GetTextureCount(static_cast<aiTextureType>(tt)) > 0) {
+                count += 1;
+            }
+        }
+    }
+    return count;
+}
+
 void FBXExporter::WriteDefinitions ()
 {
     // basically this is just bookkeeping:
@@ -619,8 +641,9 @@ void FBXExporter::WriteDefinitions ()
     // <~~ aiMaterial
     // basically if there's any phong material this is defined as phong,
     // and otherwise lambert.
-    // More complex materials have a bare-bones FbxSurfaceMaterial definition
+    // More complex materials cause a bare-bones FbxSurfaceMaterial definition
     // and are treated specially, as they're not really supported by FBX.
+    // TODO: support Maya's Stingray PBS material
     count = mScene->mNumMaterials;
     if (count) {
         bool has_phong = has_phong_mat(mScene);
@@ -665,16 +688,60 @@ void FBXExporter::WriteDefinitions ()
     
     // Texture / FbxFileTexture
     // <~~ aiTexture
+    count = count_textures(mScene);
+    if (count) {
+        n = FBX::Node("ObjectType", Property("Texture"));
+        n.AddChild("Count", count);
+        pt = FBX::Node("PropertyTemplate", Property("FbxFileTexture"));
+        p = FBX::Node("Properties70");
+        p.AddP70enum("TextureTypeUse", 0);
+        p.AddP70numberA("Texture alpha", 1.0);
+        p.AddP70enum("CurrentMappingType", 0);
+        p.AddP70enum("WrapModeU", 0);
+        p.AddP70enum("WrapModeV", 0);
+        p.AddP70bool("UVSwap", 0);
+        p.AddP70bool("PremultiplyAlpha", 1);
+        p.AddP70vectorA("Translation", 0.0, 0.0, 0.0);
+        p.AddP70vectorA("Rotation", 0.0, 0.0, 0.0);
+        p.AddP70vectorA("Scaling", 1.0, 1.0, 1.0);
+        p.AddP70vector("TextureRotationPivot", 0.0, 0.0, 0.0);
+        p.AddP70vector("TextureScalingPivot", 0.0, 0.0, 0.0);
+        p.AddP70enum("CurrentTextureBlendMode", 1);
+        p.AddP70string("UVSet", "default");
+        p.AddP70bool("UseMaterial", 0);
+        p.AddP70bool("UseMipMap", 0);
+        pt.AddChild(p);
+        n.AddChild(pt);
+        object_nodes.push_back(n);
+        total_count += count;
+    }
     
     // AnimationCurveNode / FbxAnimCurveNode
+    // TODO
     
     // CollectionExclusive / FbxDisplayLayer
+    // NOT SUPPORTED
     
     // Pose
+    count = 0;
+    if (count) {
+        n = FBX::Node("ObjectType", Property("Pose"));
+        n.AddChild("Count", count);
+        object_nodes.push_back(n);
+        total_count += count;
+    }
     
     // Deformer
+    count = 0;
+    if (count) {
+        n = FBX::Node("ObjectType", Property("Deformer"));
+        n.AddChild("Count", count);
+        object_nodes.push_back(n);
+        total_count += count;
+    }
     
     // Video / FbxVideo
+    // TODO
     
     // (template)
     count = 0;
@@ -909,71 +976,185 @@ void FBXExporter::WriteObjects ()
         
         FBX::Node p("Properties70");
         
-        // materials are weird, with a lot of duplicated fields.
-        // i can only assume some applications use one,
-        // while other applications use the other.
+        // materials exported from Maya seem to have two sets of fields.
+        // there are the properties specified in the PropertyTemplate,
+        // which correspond to the controls in Maya,
+        // and an extra set of properties with simpler names which don't.
+        // probably the extra properties are for legacy systems,
+        // which may not understand Maya's material system.
         
-        // the ones from the propertytemplate are probably the "correct" ones.
+        // the first set of values usually come in pairs,
+        // one which specifies a colour,
+        // and one which specifies a multiplier for that colour.
         
-        // first the animating ones
-        c.r = 0; c.g = 0; c.b = 0;
-        m->Get(AI_MATKEY_COLOR_AMBIENT, c);
-        p.AddP70colorA("AmbientColor", c.r, c.g, c.b);
-        c.r = 0; c.g = 0; c.b = 0;
-        m->Get(AI_MATKEY_COLOR_DIFFUSE, c);
-        p.AddP70colorA("DiffuseColor", c.r, c.g, c.b);
-        // normally FBX files from Maya have a DiffuseFactor of 0.8,
-        // but we don't store this information
-        // so leave it at the default 1.0.
-        //p.AddP70numberA("DiffuseFactor", 1.0);
-        // TransparencyFactor seems to be opacity? TODO: verify
-        f = 0;
-        m->Get(AI_MATKEY_OPACITY, f);
-        p.AddP70numberA("TransparencyFactor", f);
+        // the FBX SDK defines material properties in the first way
+        // (with colour and factor)
+        // but the colour names usually match the second "legacy" components...
+        // basically it's a mess.
+        
+        // assimp usually only stores the colour,
+        // (with the exception of specular)
+        // so we can mostly leave the factors at the default 1.0.
+        // Maya also always exports 1.0 for TransparencyFactor,
+        // whenever TransparencyColor is defined,
+        // as it defaults to 0.0.
+        
+        // first we can export the "standard" properties
+        if (m->Get(AI_MATKEY_COLOR_AMBIENT, c) == aiReturn_SUCCESS) {
+            p.AddP70colorA("AmbientColor", c.r, c.g, c.b);
+        }
+        if (m->Get(AI_MATKEY_COLOR_DIFFUSE, c) == aiReturn_SUCCESS) {
+            p.AddP70colorA("DiffuseColor", c.r, c.g, c.b);
+            // normally FBX files from Maya have a DiffuseFactor of 0.8,
+            // but we don't store this information separately from the colour
+            // so leave it at the default 1.0.
+            //p.AddP70numberA("DiffuseFactor", 1.0);
+        }
+        if (m->Get(AI_MATKEY_COLOR_TRANSPARENT, c) == aiReturn_SUCCESS) {
+            // "TransparentColor" / "TransparencyFactor"...
+            // thanks FBX, for your insightful interpretation of consistency
+            p.AddP70colorA("TransparentColor", c.r, c.g, c.b);
+            // TransparencyFactor defaults to 0.0, so set it to 1.0.
+            // note: this is not related to opacity,
+            // apart from its effect in modifying the transparency color.
+            // opacity is set from the transparency colour.
+            p.AddP70numberA("TransparencyFactor", 1.0);
+            // TODO: ensure "Opacity" property matches, perhaps?
+        }
         if (phong) {
-            c.r = 0; c.g = 0; c.b = 0;
-            m->Get(AI_MATKEY_COLOR_SPECULAR, c);
-            p.AddP70colorA("SpecularColor", c.r, c.g, c.b);
-            f = 0;
-            m->Get(AI_MATKEY_SHININESS, f);
-            p.AddP70numberA("ShininessExponent", f);
-            // is this actually the reflectivity?
-            // it seems different in my examples, and we don't import it...
-            // TODO: investigate
-            //f = 0;
-            //m->Get(AI_MATKEY_REFLECTIVITY, f);
-            //p.AddP70numberA("ReflectionFactor", f);
+            if (m->Get(AI_MATKEY_COLOR_SPECULAR, c) == aiReturn_SUCCESS) {
+                p.AddP70colorA("SpecularColor", c.r, c.g, c.b);
+            }
+            // FIXME: currently the importer fills this incorrectly.
+            // it takes the value from "Shininess",
+            // which in Maya exports is identical to ShiniessExponent.
+            /*
+            if (m->Get(AI_MATKEY_SHININESS_STRENGTH, f) == aiReturn_SUCCESS) {
+                p.AddP70numberA("ShininessFactor", f);
+            }
+            */
+            if (m->Get(AI_MATKEY_SHININESS, f) == aiReturn_SUCCESS) {
+                p.AddP70numberA("ShininessExponent", f);
+            }
+            // FIXME: the importer gets this wrong.
+            // it takes from "Reflectivity",
+            // but should take from "ReflectionFactor".
+            if (m->Get(AI_MATKEY_REFLECTIVITY, f) == aiReturn_SUCCESS) {
+                p.AddP70numberA("ReflectionFactor", f);
+            }
         }
         
         // now the non-animating ones - perhaps a legacy system?
         // for safety let's include it.
+        // these values seem to be always present,
+        // and there's no default in the template for them.
+        // note that Blender completely ignores these values,
+        // and does not include them in its exports,
+        // so they're probably not very important.
+        // however we can include them, so let's.
         c.r = 0; c.g = 0; c.b = 0;
         m->Get(AI_MATKEY_COLOR_EMISSIVE, c);
         p.AddP70vector("Emissive", c.r, c.g, c.b);
-        c.r = 0; c.g = 0; c.b = 0;
+        c.r = 0.2; c.g = 0.2; c.b = 0.2;
         m->Get(AI_MATKEY_COLOR_AMBIENT, c);
         p.AddP70vector("Ambient", c.r, c.g, c.b);
-        c.r = 0; c.g = 0; c.b = 0;
+        c.r = 0.8; c.g = 0.8; c.b = 0.8;
         m->Get(AI_MATKEY_COLOR_DIFFUSE, c);
         p.AddP70vector("Diffuse", c.r, c.g, c.b);
-        f = 0;
+        // legacy "opacity" is determined from transparency colour (RGB) as:
+        // 1.0 - ((R + G + B) / 3).
+        // however we actually have an opacity value,
+        // so use that if it's set.
+        f = 1.0;
+        if (m->Get(AI_MATKEY_COLOR_TRANSPARENT, c) == aiReturn_SUCCESS) {
+            f = 1.0 - ((c.r + c.g + c.b) / 3);
+        }
         m->Get(AI_MATKEY_OPACITY, f);
         p.AddP70double("Opacity", f);
         if (phong) {
-            c.r = 0; c.g = 0; c.b = 0;
+            c.r = 0.2; c.g = 0.2; c.b = 0.2;
             m->Get(AI_MATKEY_COLOR_SPECULAR, c);
+            // FIXME: this should be multiplied by SHININESS_STRENGTH,
+            // but importer fills that incorrectly with "Shininess".
             p.AddP70vector("Specular", c.r, c.g, c.b);
-            f = 0;
+            f = 20.0;
             m->Get(AI_MATKEY_SHININESS, f);
             p.AddP70double("Shininess", f);
-            f = 0;
+            // legacy "Reflectivity" is R*R*0.25479,
+            // where R is the proportion of light reflected (AKA reflectivity).
+            // no idea why.
+            f = 0.0;
             m->Get(AI_MATKEY_REFLECTIVITY, f);
-            p.AddP70double("Reflectivity", f);
+            p.AddP70double("Reflectivity", f*f*0.25479);
         }
         
         n.AddChild(p);
         
         n.Dump(outstream);
+    }
+    
+    // aiTexture
+    std::map<std::string,int64_t> texture_uids;
+    for (size_t i = 0; i < mScene->mNumMaterials; ++i) {
+        // texture are attached to materials
+        aiMaterial* mat = mScene->mMaterials[i];
+        int64_t material_uid = material_uids[i];
+        
+        size_t n;
+        aiTextureType tt;
+        
+        n = mat->GetTextureCount(aiTextureType_DIFFUSE);
+        tt = aiTextureType_DIFFUSE;
+        if (n > 1) {
+            throw DeadlyExportError(
+                "Multilayer Textures unsupported (for now)."
+            );
+        }
+        if (n == 1) {
+            aiString tpath;
+            if (mat->GetTexture(tt, 0, &tpath) != aiReturn_SUCCESS) {
+                std::stringstream err;
+                err << "Failed to get texture 0 for texture of type " << tt;
+                err << " on material " << i;
+                err << ", however GetTextureCount returned 1.";
+                throw DeadlyExportError(err.str());
+            }
+            int64_t texture_uid;
+            std::string texture_path(tpath.C_Str());
+            // see if we need to include this texture
+            auto elem = texture_uids.find(texture_path);
+            if (elem == texture_uids.end()) {
+                texture_uid = generate_uid();
+                texture_uids[texture_path] = texture_uid;
+                // create texture node for this texture
+                // TODO: some way to determine texture name?
+                std::string texture_name = "" + FBX::SEPARATOR + "Texture";
+                FBX::Node tnode("Texture");
+                tnode.AddProperties(texture_uid, texture_name, "");
+                // FIXME: Video Clip? surely there's a better type?
+                tnode.AddChild("Type", "TextureVideoClip");
+                tnode.AddChild("Version", int32_t(202));
+                //tnode.AddChild("TextureName", texture_name);
+                FBX::Node p("Properties70");
+                p.AddP70enum("CurrentTextureBlendMode", 0); // TODO: verify
+                //p.AddP70string("UVSet", ""); // TODO: how should this work?
+                p.AddP70bool("UseMaterial", 1);
+                tnode.AddChild(p);
+                tnode.AddChild("FileName", texture_path);
+                //tnode.AddChild("RelativeFilename", texture_path_relative); // TODO
+                tnode.AddChild("ModelUVTranslation", double(0.0), double(0.0));
+                tnode.AddChild("ModelUVScaling", double(1.0), double(1.0));
+                tnode.AddChild("Texture_Alpha_Soutce", "None");
+                tnode.AddChild("Cropping", int32_t(0), int32_t(0), int32_t(0), int32_t(0));
+                tnode.Dump(outstream);
+            } else {
+                texture_uid = elem->second;
+            }
+            // connect to material
+            FBX::Node c("C");
+            c.AddProperties("OP", texture_uid, material_uid, "DiffuseColor");
+            connections.push_back(c);
+        }
     }
     
     // write nodes (i.e. model heirarchy)
