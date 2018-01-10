@@ -66,8 +66,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sstream> // stringstream
 #include <ctime> // localtime, tm_*
 #include <map>
-//#include <inttypes.h>
-
+#include <iostream> // endl
+using std::cout; using std::endl;
 
 // RESOURCES:
 // https://code.blender.org/2013/08/fbx-binary-file-format-specification/
