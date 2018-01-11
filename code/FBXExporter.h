@@ -257,7 +257,18 @@ namespace FBX
             static_assert(std::is_void<T>::value, "TRIED TO CREATE FBX PROPERTY WITH UNSUPPORTED TYPE, CHECK YOUR PROPERTY INSTANTIATION");
         }
         
-        size_t size() { return data.size() + 1; } // TODO: array types size()
+        size_t size() {
+            switch (type) {
+            case 'C': case 'Y': case 'I': case 'F': case 'D': case 'L':
+                return data.size() + 1;
+            case 'S': case 'R':
+                return data.size() + 5;
+            case 'i': case 'd':
+                return data.size() + 13;
+            default:
+                throw DeadlyExportError("Requested size on property of unknown type");
+            }
+        }
         
         void Dump(Assimp::StreamWriterLE &s) {
             s.PutU1(type);
