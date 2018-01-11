@@ -482,7 +482,7 @@ void FBXExporter::WriteDefinitions ()
     if (count) {
         n = FBX::Node("ObjectType", Property("AnimationStack"));
         n.AddChild("Count", count);
-        pt = FBX::Node("PropertyTemplate", Property("FBXAnimLayer"));
+        pt = FBX::Node("PropertyTemplate", Property("FbxAnimStack"));
         p = FBX::Node("Properties70");
         p.AddP70string("Description", "");
         p.AddP70time("LocalStart", 0);
@@ -538,7 +538,7 @@ void FBXExporter::WriteDefinitions ()
     
     // Model / FbxNode
     // <~~ node heirarchy
-    count = count_nodes(mScene->mRootNode);
+    count = count_nodes(mScene->mRootNode) - 1; // (not counting root node)
     if (count) {
         n = FBX::Node("ObjectType", Property("Model"));
         n.AddChild("Count", count);
@@ -660,7 +660,11 @@ void FBXExporter::WriteDefinitions ()
             pt.AddProperty("FbxSurfaceLambert");
         }
         p = FBX::Node("Properties70");
-        p.AddP70string("ShadingModel", "Phong");
+        if (has_phong) {
+            p.AddP70string("ShadingModel", "Phong");
+        } else {
+            p.AddP70string("ShadingModel", "Lambert");
+        }
         p.AddP70bool("MultiLayer", 0);
         p.AddP70colorA("EmissiveColor", 0.0, 0.0, 0.0);
         p.AddP70numberA("EmissiveFactor", 1.0);
