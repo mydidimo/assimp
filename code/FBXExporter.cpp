@@ -1152,10 +1152,58 @@ void FBXExporter::WriteObjects ()
         n.Dump(outstream);
     }
     
-    // aiTexture
+    // we need to look up all the images we're using,
+    // so we can generate uids, and eliminate duplicates.
+    std::map<std::string, int64_t> uid_by_image;
+    for (size_t i = 0; i < mScene->mNumMaterials; ++i) {
+        aiString texpath;
+        aiMaterial* mat = mScene->mMaterials[i];
+        for (
+            size_t tt = aiTextureType_DIFFUSE;
+            tt < aiTextureType_UNKNOWN;
+            ++tt
+        ){
+            const aiTextureType textype = static_cast<aiTextureType>(tt);
+            const size_t texcount = mat->GetTextureCount(textype);
+            for (size_t j = 0; j < texcount; ++j) {
+                mat->GetTexture(textype, j, &texpath);
+                const std::string texstring = texpath.C_Str();
+                auto elem = uid_by_image.find(texstring);
+                if (elem == uid_by_image.end()) {
+                    uid_by_image[texstring] = generate_uid();
+                }
+            }
+        }
+    }
+    
+    // FbxVideo - stores images used by textures.
+    for (const auto &it : uid_by_image) {
+        if (it.first.compare(0, 1, "*") == 0) {
+            // TODO: embedded textures
+            continue;
+        }
+        FBX::Node n("Video");
+        const int64_t& uid = it.second;
+        const std::string name = ""; // TODO: ... name???
+        n.AddProperties(uid, name + FBX::SEPARATOR + "Video", "Clip");
+        n.AddChild("Type", "Clip");
+        FBX::Node p("Properties70");
+        // TODO: get full path... relative path... etc... ugh...
+        // for now just use the same path for everything,
+        // and hopefully one of them will work out.
+        const std::string& path = it.first;
+        p.AddP70("Path", "KString", "XRefUrl", "", path);
+        n.AddChild(p);
+        n.AddChild("UseMipMap", int32_t(0));
+        n.AddChild("Filename", path);
+        n.AddChild("RelativeFilename", path);
+        n.Dump(outstream);
+    }
+    
+    // FbxTexture - stores texture information
     std::map<std::string,int64_t> texture_uids;
     for (size_t i = 0; i < mScene->mNumMaterials; ++i) {
-        // texture are attached to materials
+        // textures are attached to materials
         aiMaterial* mat = mScene->mMaterials[i];
         int64_t material_uid = material_uids[i];
         
