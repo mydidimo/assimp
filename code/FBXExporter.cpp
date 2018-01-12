@@ -1043,38 +1043,27 @@ void FBXExporter::WriteObjects ()
         
         FBX::Node p("Properties70");
         
-        // materials exported from Maya seem to have two sets of fields.
+        // materials exported using the FBX SDK have two sets of fields.
         // there are the properties specified in the PropertyTemplate,
-        // which correspond to the controls in Maya,
-        // and an extra set of properties with simpler names which don't.
-        // probably the extra properties are for legacy systems,
-        // which may not understand Maya's material system.
-        
-        // the first set of values usually come in pairs,
-        // one which specifies a colour,
-        // and one which specifies a multiplier for that colour.
-        
-        // the FBX SDK defines material properties in the first way
-        // (with colour and factor)
-        // but the colour names usually match the second "legacy" components...
-        // basically it's a mess.
-        
-        // assimp usually only stores the colour,
-        // (with the exception of specular)
-        // so we can mostly leave the factors at the default 1.0.
-        // Maya also always exports 1.0 for TransparencyFactor,
-        // whenever TransparencyColor is defined,
-        // as it defaults to 0.0.
+        // which are those supported by the modernFBX SDK,
+        // and an extra set of properties with simpler names.
+        // The extra properties are a legacy material system from pre-2009.
+        //
+        // In the modern system, each property has "color" and "factor".
+        // Generally the interpretation of these seems to be
+        // that the colour is multiplied by the factor before use,
+        // but this is not always clear-cut.
+        //
+        // Usually assimp only stores the colour,
+        // so we can just leave the factors at the default "1.0".
         
         // first we can export the "standard" properties
         if (m->Get(AI_MATKEY_COLOR_AMBIENT, c) == aiReturn_SUCCESS) {
             p.AddP70colorA("AmbientColor", c.r, c.g, c.b);
+            //p.AddP70numberA("AmbientFactor", 1.0);
         }
         if (m->Get(AI_MATKEY_COLOR_DIFFUSE, c) == aiReturn_SUCCESS) {
             p.AddP70colorA("DiffuseColor", c.r, c.g, c.b);
-            // normally FBX files from Maya have a DiffuseFactor of 0.8,
-            // but we don't store this information separately from the colour
-            // so leave it at the default 1.0.
             //p.AddP70numberA("DiffuseFactor", 1.0);
         }
         if (m->Get(AI_MATKEY_COLOR_TRANSPARENT, c) == aiReturn_SUCCESS) {
@@ -1082,43 +1071,40 @@ void FBXExporter::WriteObjects ()
             // thanks FBX, for your insightful interpretation of consistency
             p.AddP70colorA("TransparentColor", c.r, c.g, c.b);
             // TransparencyFactor defaults to 0.0, so set it to 1.0.
-            // note: this is not related to opacity,
-            // apart from its effect in modifying the transparency color.
-            // opacity is set from the transparency colour.
+            // note: Maya always sets this to 1.0,
+            // so we can't use it sensibly as "Opacity".
+            // In stead we rely on the legacy "Opacity" value, below.
+            // Blender also relies on "Opacity" not "TransparencyFactor",
+            // probably for a similar reason.
             p.AddP70numberA("TransparencyFactor", 1.0);
-            // TODO: ensure "Opacity" property matches, perhaps?
+        }
+        if (m->Get(AI_MATKEY_COLOR_REFLECTIVE, c) == aiReturn_SUCCESS) {
+            p.AddP70colorA("ReflectionColor", c.r, c.g, c.b);
+        }
+        if (m->Get(AI_MATKEY_REFLECTIVITY, f) == aiReturn_SUCCESS) {
+            p.AddP70numberA("ReflectionFactor", f);
         }
         if (phong) {
             if (m->Get(AI_MATKEY_COLOR_SPECULAR, c) == aiReturn_SUCCESS) {
                 p.AddP70colorA("SpecularColor", c.r, c.g, c.b);
             }
-            // FIXME: currently the importer fills this incorrectly.
-            // it takes the value from "Shininess",
-            // which in Maya exports is identical to ShiniessExponent.
-            /*
             if (m->Get(AI_MATKEY_SHININESS_STRENGTH, f) == aiReturn_SUCCESS) {
                 p.AddP70numberA("ShininessFactor", f);
             }
-            */
             if (m->Get(AI_MATKEY_SHININESS, f) == aiReturn_SUCCESS) {
                 p.AddP70numberA("ShininessExponent", f);
             }
-            // FIXME: the importer gets this wrong.
-            // it takes from "Reflectivity",
-            // but should take from "ReflectionFactor".
             if (m->Get(AI_MATKEY_REFLECTIVITY, f) == aiReturn_SUCCESS) {
                 p.AddP70numberA("ReflectionFactor", f);
             }
         }
         
-        // now the non-animating ones - perhaps a legacy system?
-        // for safety let's include it.
-        // these values seem to be always present,
-        // and there's no default in the template for them.
-        // note that Blender completely ignores these values,
-        // and does not include them in its exports,
-        // so they're probably not very important.
-        // however we can include them, so let's.
+        // Now the legacy system.
+        // For safety let's include it.
+        // thrse values don't exist in the property template,
+        // and usualy are completely ignored when loading.
+        // One notable exception is the "Opacity" property,
+        // which Blender uses as (1.0 - alpha).
         c.r = 0; c.g = 0; c.b = 0;
         m->Get(AI_MATKEY_COLOR_EMISSIVE, c);
         p.AddP70vector("Emissive", c.r, c.g, c.b);
@@ -1128,10 +1114,12 @@ void FBXExporter::WriteObjects ()
         c.r = 0.8; c.g = 0.8; c.b = 0.8;
         m->Get(AI_MATKEY_COLOR_DIFFUSE, c);
         p.AddP70vector("Diffuse", c.r, c.g, c.b);
-        // legacy "opacity" is determined from transparency colour (RGB) as:
-        // 1.0 - ((R + G + B) / 3).
-        // however we actually have an opacity value,
-        // so use that if it's set.
+        // The FBX SDK determines "Opacity" from transparency colour (RGB)
+        // and factor (F) as: O = (1.0 - F * ((R + G + B) / 3)).
+        // However we actually have an opacity value,
+        // so we should take it from AI_MATKEY_OPACITY if possible.
+        // It might make more sense to use TransparencyFactor,
+        // but Blender actually loads "Opacity" correctly, so let's use it.
         f = 1.0;
         if (m->Get(AI_MATKEY_COLOR_TRANSPARENT, c) == aiReturn_SUCCESS) {
             f = 1.0 - ((c.r + c.g + c.b) / 3);
@@ -1139,20 +1127,24 @@ void FBXExporter::WriteObjects ()
         m->Get(AI_MATKEY_OPACITY, f);
         p.AddP70double("Opacity", f);
         if (phong) {
+            // specular color is multiplied by shininess_strength
             c.r = 0.2; c.g = 0.2; c.b = 0.2;
             m->Get(AI_MATKEY_COLOR_SPECULAR, c);
-            // FIXME: this should be multiplied by SHININESS_STRENGTH,
-            // but importer fills that incorrectly with "Shininess".
-            p.AddP70vector("Specular", c.r, c.g, c.b);
+            f = 1.0;
+            m->Get(AI_MATKEY_SHININESS_STRENGTH, f);
+            p.AddP70vector("Specular", f*c.r, f*c.g, f*c.b);
             f = 20.0;
             m->Get(AI_MATKEY_SHININESS, f);
             p.AddP70double("Shininess", f);
-            // legacy "Reflectivity" is R*R*0.25479,
-            // where R is the proportion of light reflected (AKA reflectivity).
-            // no idea why.
+            // Legacy "Reflectivity" is F*F*((R+G+B)/3),
+            // where F is the proportion of light reflected (AKA reflectivity),
+            // and RGB is the reflective colour of the material.
+            // No idea why, but we might as well set it the same way.
             f = 0.0;
             m->Get(AI_MATKEY_REFLECTIVITY, f);
-            p.AddP70double("Reflectivity", f*f*0.25479);
+            c.r = 1.0, c.g = 1.0, c.b = 1.0;
+            m->Get(AI_MATKEY_COLOR_REFLECTIVE, c);
+            p.AddP70double("Reflectivity", f*f*((c.r+c.g+c.b)/3.0));
         }
         
         n.AddChild(p);
