@@ -66,6 +66,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sstream> // stringstream
 #include <ctime> // localtime, tm_*
 #include <map>
+#include <unordered_set>
 #include <iostream> // endl
 using std::cout; using std::endl;
 
@@ -433,10 +434,9 @@ bool has_phong_mat(const aiScene* scene)
     return false;
 }
 
-size_t count_textures(const aiScene* scene) {
-    size_t count = 0;
-    // TODO: embedded textures
-    //count += scene->mNumTextures;
+size_t count_images(const aiScene* scene) {
+    std::unordered_set<std::string> images;
+    aiString texpath;
     for (size_t i = 0; i < scene->mNumMaterials; ++i) {
         aiMaterial* mat = scene->mMaterials[i];
         for (
@@ -444,8 +444,30 @@ size_t count_textures(const aiScene* scene) {
             tt < aiTextureType_UNKNOWN;
             ++tt
         ){
-            // FIXME: handle unsupported texture types
-            // FIXME: handle duplicated textures
+            const aiTextureType textype = static_cast<aiTextureType>(tt);
+            const size_t texcount = mat->GetTextureCount(textype);
+            for (size_t j = 0; j < texcount; ++j) {
+                mat->GetTexture(textype, j, &texpath);
+                images.insert(std::string(texpath.C_Str()));
+            }
+        }
+    }
+    for (auto &s : images) {
+        cout << "found image: " << s << endl;
+    }
+    return images.size();
+}
+
+size_t count_textures(const aiScene* scene) {
+    size_t count = 0;
+    for (size_t i = 0; i < scene->mNumMaterials; ++i) {
+        aiMaterial* mat = scene->mMaterials[i];
+        for (
+            size_t tt = aiTextureType_DIFFUSE;
+            tt < aiTextureType_UNKNOWN;
+            ++tt
+        ){
+            // TODO: handle layered textures
             if (mat->GetTextureCount(static_cast<aiTextureType>(tt)) > 0) {
                 count += 1;
             }
@@ -694,6 +716,35 @@ void FBXExporter::WriteDefinitions ()
         total_count += count;
     }
     
+    // Video / FbxVideo
+    // one for each image file.
+    count = count_images(mScene);
+    if (count) {
+        n = FBX::Node("ObjectType", Property("Video"));
+        n.AddChild("Count", count);
+        pt = FBX::Node("PropertyTemplate", Property("FbxVideo"));
+        p = FBX::Node("Properties70");
+        p.AddP70bool("ImageSequence", 0);
+        p.AddP70int("ImageSequenceOffset", 0);
+        p.AddP70double("FrameRate", 0.0);
+        p.AddP70int("LastFrame", 0);
+        p.AddP70int("Width", 0);
+        p.AddP70int("Height", 0);
+        p.AddP70("Path", "KString", "XRefUrl", "", "");
+        p.AddP70int("StartFrame", 0);
+        p.AddP70int("StopFrame", 0);
+        p.AddP70double("PlaySpeed", 0.0);
+        p.AddP70time("Offset", 0);
+        p.AddP70enum("InterlaceMode", 0);
+        p.AddP70bool("FreeRunning", 0);
+        p.AddP70bool("Loop", 0);
+        p.AddP70enum("AccessMode", 0);
+        pt.AddChild(p);
+        n.AddChild(pt);
+        object_nodes.push_back(n);
+        total_count += count;
+    }
+    
     // Texture / FbxFileTexture
     // <~~ aiTexture
     count = count_textures(mScene);
@@ -725,7 +776,18 @@ void FBXExporter::WriteDefinitions ()
     }
     
     // AnimationCurveNode / FbxAnimCurveNode
-    // TODO
+    count = 0;
+    if (count) {
+        n = FBX::Node("ObjectType", Property("AnimationCurveNode"));
+        n.AddChild("Count", count);
+        pt = FBX::Node("PropertyTemplate", Property("FbxAnimCurveNode"));
+        p = FBX::Node("Properties70");
+        p.AddP70("d", "Compound", "", "");
+        pt.AddChild(p);
+        n.AddChild(pt);
+        object_nodes.push_back(n);
+        total_count += count;
+    }
     
     // CollectionExclusive / FbxDisplayLayer
     // NOT SUPPORTED
@@ -747,9 +809,6 @@ void FBXExporter::WriteDefinitions ()
         object_nodes.push_back(n);
         total_count += count;
     }
-    
-    // Video / FbxVideo
-    // TODO
     
     // (template)
     count = 0;
