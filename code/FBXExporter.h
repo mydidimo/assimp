@@ -248,6 +248,16 @@ namespace FBX
             double* d = reinterpret_cast<double*>(data.data());
             for (size_t i = 0; i < va.size(); ++i) { d[i] = va[i]; }
         }
+        explicit Property(const aiMatrix4x4& vm)
+            : type('d'), data(8*16)
+        {
+            double* d = reinterpret_cast<double*>(data.data());
+            for (size_t c = 0; c < 4; ++c) {
+                for (size_t r = 0; r < 4; ++r) {
+                    d[4*c+r] = vm[r][c];
+                }
+            }
+        }
         
         // this will catch any type not defined above,
         // so that we don't accidentally convert something we don't want.

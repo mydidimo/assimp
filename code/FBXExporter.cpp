@@ -831,6 +831,35 @@ void FBXExporter::WriteDefinitions ()
     defs.Dump(outfile);
 }
 
+aiNode* get_node_for_mesh(unsigned int meshIndex, aiNode* node)
+{
+    for (size_t i = 0; i < node->mNumMeshes; ++i) {
+        if (node->mMeshes[i] == meshIndex) {
+            return node;
+        }
+    }
+    for (size_t i = 0; i < node->mNumChildren; ++i) {
+        aiNode* ret = get_node_for_mesh(meshIndex, node->mChildren[i]);
+        if (ret) { return ret; }
+    }
+    return nullptr;
+}
+
+aiMatrix4x4 get_world_transform(const aiNode* node, const aiScene* scene)
+{
+    std::vector<const aiNode*> node_chain;
+    while (node != scene->mRootNode) {
+        node_chain.push_back(node);
+        node = node->mParent;
+    }
+    aiMatrix4x4 transform;
+    for (auto n = node_chain.rbegin(); n != node_chain.rend(); ++n) {
+        transform *= (*n)->mTransformation;
+    }
+    return transform;
+}
+
+
 void FBXExporter::WriteObjects ()
 {
     // numbers should match those given in definitions! make sure to check
@@ -1319,6 +1348,203 @@ void FBXExporter::WriteObjects ()
             tnode.Dump(outstream);
         }
     }
+    
+    // bones.
+    //
+    // output structure:
+    // subset of node heirarchy that are "skeleton",
+    // i.e. do not have meshes but only bones.
+    // but.. i'm not sure how anyone could guarantee that...
+    //
+    // input...
+    // well, for each mesh it has "bones",
+    // and the bone names correspond to nodes.
+    // of course we also need the parent nodes,
+    // as they give some of the transform........
+    //
+    // well. we can assume a sane input, i suppose.
+    // 
+    // so input is the bone node heirarchy,
+    // with an extra thing for the transformation of the BONE in MESH space.
+    //
+    // output is a set of bone nodes,
+    // a "bindpose" which indicates the default local transform of all bones,
+    // and a set of "deformers".
+    // each deformer is parented to a mesh geometry,
+    // and has one or more "subdeformer"s as children.
+    // each subdeformer has one bone node as a child,
+    // and represents the influence of that bone on the grandparent mesh.
+    // the subdeformer has a list of indices, and weights,
+    // with indices specifying vertex indices,
+    // and weights specifying the correspoding influence of this bone.
+    // it also has Transform and TransformLink elements,
+    // specifying the transform of the MESH in BONE space,
+    // and the transformation of the BONE in WORLD space,
+    // likely in the bindpose.
+    //
+    // the input bone structure is different but similar,
+    // storing the number of weights for this bone,
+    // and an array of (vertex index, weight) pairs.
+    //
+    // one sticky point is that the number of vertices may not match,
+    // because assimp splits vertices by normal, uv, etc.
+    
+    // first we should mark all the skeleton nodes,
+    // so that they can be treated as LimbNode in stead of Mesh or Null.
+    // at the same time we can build up a map of bone nodes.
+    std::unordered_set<aiNode*> limbnodes;
+    std::map<std::string,aiNode*> node_by_bone;
+    for (size_t mi = 0; mi < mScene->mNumMeshes; ++mi) {
+        const aiMesh* m = mScene->mMeshes[mi];
+        for (size_t bi =0; bi < m->mNumBones; ++bi) {
+            const aiBone* b = m->mBones[bi];
+            const std::string name(b->mName.C_Str());
+            if (node_by_bone.count(name) > 0) {
+                // already processed, skip
+                continue;
+            }
+            aiNode* n = mScene->mRootNode->FindNode(b->mName);
+            if (!n) {
+                // this should never happen
+                std::stringstream err;
+                err << "Failed to find node for bone: \"" << name << "\"";
+                throw DeadlyExportError(err.str());
+            }
+            node_by_bone[name] = n;
+            limbnodes.insert(n);
+        }
+    }
+    
+    // now, for each aiMesh, we need to export a deformer,
+    // and for each aiBone a subdeformer,
+    // which should have all the skinning info.
+    // these will need to be connected properly to the mesh,
+    // and we can do that all now.
+    for (size_t mi = 0; mi < mScene->mNumMeshes; ++mi) {
+        const aiMesh* m = mScene->mMeshes[mi];
+        if (!m->HasBones()) {
+            continue;
+        }
+        // make a deformer for this mesh
+        int64_t deformer_uid = generate_uid();
+        FBX::Node dnode("Deformer");
+        dnode.AddProperties(deformer_uid, FBX::SEPARATOR + "Deformer", "Skin");
+        dnode.AddChild("Version", int32_t(101));
+        // "acuracy"... this is not a typo....
+        dnode.AddChild("Link_DeformAcuracy", double(50));
+        dnode.AddChild("SkinningType", "Linear"); // TODO: other modes?
+        dnode.Dump(outstream);
+        
+        // connect it
+        FBX::Node c("C");
+        c.AddProperties("OO", deformer_uid, mesh_uids[mi]);
+        connections.push_back(c); // TODO: emplace_back
+        
+        // we will be indexing by vertex...
+        // but there might be a different number of "vertices"
+        // between assimp and our output FBX.
+        // this code is cut-and-pasted from the geometry section above...
+        // ideally this should not be so.
+        // ---
+        // index of original vertex in vertex data vector
+        std::vector<int32_t> vertex_indices;
+        // map of vertex value to its index in the data vector
+        std::map<aiVector3D,size_t> index_by_vertex_value;
+        size_t index = 0;
+        for (size_t vi = 0; vi < m->mNumVertices; ++vi) {
+            aiVector3D vtx = m->mVertices[vi];
+            auto elem = index_by_vertex_value.find(vtx);
+            if (elem == index_by_vertex_value.end()) {
+                vertex_indices.push_back(index);
+                index_by_vertex_value[vtx] = index;
+                ++index;
+            } else {
+                vertex_indices.push_back(elem->second);
+            }
+        }
+        
+        // first get this mesh's position in world space,
+        // as we'll need it for each subdeformer.
+        //
+        // ...of course taking the position of the MESH doesn't make sense,
+        // as it can be instanced to many nodes.
+        // All we can do is assume no instancing,
+        // and take the first node we find that contains the mesh.
+        //
+        // We could in stead take the transform from the bone's node,
+        // but there's no guarantee that the bone is in the bindpose,
+        // so this would be even less reliable.
+        aiNode* mesh_node = get_node_for_mesh(mi, mScene->mRootNode);
+        aiMatrix4x4 mesh_node_xform = get_world_transform(mesh_node, mScene);
+        
+        // now make a subdeformer for each bone
+        for (size_t bi =0; bi < m->mNumBones; ++bi) {
+            const aiBone* b = m->mBones[bi];
+            const std::string name(b->mName.C_Str());
+            const int64_t subdeformer_uid = generate_uid();
+            FBX::Node sdnode("Deformer");
+            sdnode.AddProperties(
+                subdeformer_uid, FBX::SEPARATOR + "SubDeformer", "Cluster"
+            );
+            sdnode.AddChild("Version", int32_t(100));
+            sdnode.AddChild("UserData", "", "");
+            
+            // get indices and weights
+            std::vector<int32_t> subdef_indices;
+            std::vector<double> subdef_weights;
+            int32_t last_index = -1;
+            for (size_t wi = 0; wi < b->mNumWeights; ++wi) {
+                int32_t vi = vertex_indices[b->mWeights[wi].mVertexId];
+                if (vi == last_index) {
+                    // only for vertices we exported to fbx
+                    // TODO, FIXME: this assumes identically-located vertices
+                    // will always deform in the same way.
+                    // as assimp doesn't store a separate list of "positions",
+                    // there's not much that can be done about this
+                    // other than assuming that identical position means
+                    // identical vertex.
+                    continue;
+                }
+                subdef_indices.push_back(vi);
+                subdef_weights.push_back(b->mWeights[wi].mWeight);
+                last_index = vi;
+            }
+            // yes, "indexes"
+            sdnode.AddChild("Indexes", subdef_indices);
+            sdnode.AddChild("Weights", subdef_weights);
+            // transform is the transform of the mesh, but in bone space...
+            // should be the inverse of assimp's mOffsetMatrix.
+            aiMatrix4x4 tr = b->mOffsetMatrix;
+            /// ... however mOffsetMatrix is clearly the mesh in bone space.
+            // this directly contradicts the docs :/
+            //tr.Inverse();
+            sdnode.AddChild("Transform", tr);
+            // transformlink should be the position of the bone in world space,
+            // in the bind pose.
+            // as mOffsetMatrix is in fact for the mesh in bone space,
+            // to get the bone in world space we need to take the inverse,
+            // and multiply by the mesh's world space position
+            tr = b->mOffsetMatrix;
+            tr.Inverse();
+            // (not that it makes sense to take the mesh position,
+            // as it could be instanced, but there's no better alternative)
+            tr *= mesh_node_xform;
+            sdnode.AddChild("TransformLink", tr);
+            
+            // done
+            sdnode.Dump(outstream);
+            
+            // lastly, connect to the parent deformer
+            c = FBX::Node("C");
+            c.AddProperties("OO", subdeformer_uid, deformer_uid);
+            connections.push_back(c); // TODO: emplace_back
+        }
+        
+        
+    }
+    
+    
+    // TODO: cameras, lights
     
     // write nodes (i.e. model heirarchy)
     // start at root node
