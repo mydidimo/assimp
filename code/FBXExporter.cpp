@@ -1200,24 +1200,50 @@ void FBXExporter::WriteObjects ()
         n.Dump(outstream);
     }
     
-    // FbxTexture - stores texture information
-    std::map<std::string,int64_t> texture_uids;
+    // Textures
+    // referenced by material_index/texture_type pairs.
+    std::map<std::pair<size_t,size_t>,int64_t> texture_uids;
+    const std::map<aiTextureType,std::string> prop_name_by_tt = {
+        {aiTextureType_DIFFUSE, "DiffuseColor"},
+        {aiTextureType_SPECULAR, "SpecularColor"},
+        {aiTextureType_AMBIENT, "AmbientColor"},
+        {aiTextureType_EMISSIVE, "EmissiveColor"},
+        {aiTextureType_HEIGHT, "Bump"},
+        {aiTextureType_NORMALS, "NormalMap"},
+        {aiTextureType_SHININESS, "ShininessExponent"},
+        {aiTextureType_OPACITY, "TransparentColor"},
+        {aiTextureType_DISPLACEMENT, "DisplacementColor"},
+        //{aiTextureType_LIGHTMAP, "???"},
+        {aiTextureType_REFLECTION, "ReflectionColor"}
+        //{aiTextureType_UNKNOWN, ""}
+    };
     for (size_t i = 0; i < mScene->mNumMaterials; ++i) {
         // textures are attached to materials
         aiMaterial* mat = mScene->mMaterials[i];
         int64_t material_uid = material_uids[i];
         
-        size_t n;
-        aiTextureType tt;
-        
-        n = mat->GetTextureCount(aiTextureType_DIFFUSE);
-        tt = aiTextureType_DIFFUSE;
-        if (n > 1) {
-            throw DeadlyExportError(
-                "Multilayer Textures unsupported (for now)."
-            );
-        }
-        if (n == 1) {
+        for (
+            size_t j = aiTextureType_DIFFUSE;
+            j < aiTextureType_UNKNOWN;
+            ++j
+        ) {
+            const aiTextureType tt = static_cast<aiTextureType>(j);
+            size_t n = mat->GetTextureCount(tt);
+            
+            if (n < 1) { // no texture of this type
+                continue;
+            }
+            
+            if (n > 1) {
+                // TODO: multilayer textures
+                std::stringstream err;
+                err << "Multilayer textures not supported (for now),";
+                err << " skipping texture type " << j;
+                err << " of material " << i;
+                DefaultLogger::get()->warn(err.str());
+            }
+            
+            // get image path for this (single-image) texture
             aiString tpath;
             if (mat->GetTexture(tt, 0, &tpath) != aiReturn_SUCCESS) {
                 std::stringstream err;
@@ -1226,41 +1252,71 @@ void FBXExporter::WriteObjects ()
                 err << ", however GetTextureCount returned 1.";
                 throw DeadlyExportError(err.str());
             }
-            int64_t texture_uid;
-            std::string texture_path(tpath.C_Str());
-            // see if we need to include this texture
-            auto elem = texture_uids.find(texture_path);
-            if (elem == texture_uids.end()) {
-                texture_uid = generate_uid();
-                texture_uids[texture_path] = texture_uid;
-                // create texture node for this texture
-                // TODO: some way to determine texture name?
-                std::string texture_name = "" + FBX::SEPARATOR + "Texture";
-                FBX::Node tnode("Texture");
-                tnode.AddProperties(texture_uid, texture_name, "");
-                // FIXME: Video Clip? surely there's a better type?
-                tnode.AddChild("Type", "TextureVideoClip");
-                tnode.AddChild("Version", int32_t(202));
-                //tnode.AddChild("TextureName", texture_name);
-                FBX::Node p("Properties70");
-                p.AddP70enum("CurrentTextureBlendMode", 0); // TODO: verify
-                //p.AddP70string("UVSet", ""); // TODO: how should this work?
-                p.AddP70bool("UseMaterial", 1);
-                tnode.AddChild(p);
-                tnode.AddChild("FileName", texture_path);
-                //tnode.AddChild("RelativeFilename", texture_path_relative); // TODO
-                tnode.AddChild("ModelUVTranslation", double(0.0), double(0.0));
-                tnode.AddChild("ModelUVScaling", double(1.0), double(1.0));
-                tnode.AddChild("Texture_Alpha_Soutce", "None");
-                tnode.AddChild("Cropping", int32_t(0), int32_t(0), int32_t(0), int32_t(0));
-                tnode.Dump(outstream);
-            } else {
-                texture_uid = elem->second;
+            const std::string texture_path(tpath.C_Str());
+            
+            // get connected image uid
+            auto elem = uid_by_image.find(texture_path);
+            if (elem == uid_by_image.end()) {
+                // this should never happen
+                std::stringstream err;
+                err << "Failed to find video element for texture with path";
+                err << " \"" << texture_path << "\"";
+                err << ", type " << j << ", material " << i;
+                throw DeadlyExportError(err.str());
             }
-            // connect to material
+            const int64_t image_uid = elem->second;
+            
+            // get the name of the material property to connect to
+            auto elem2 = prop_name_by_tt.find(tt);
+            if (elem2 == prop_name_by_tt.end()) {
+                // don't know how to handle this type of texture,
+                // so skip it.
+                std::stringstream err;
+                err << "Not sure how to handle texture of type " << j;
+                err << " on material " << i;
+                err << ", skipping...";
+                DefaultLogger::get()->warn(err.str());
+                continue;
+            }
+            const std::string& prop_name = elem2->second;
+            
+            // generate a uid for this texture
+            const int64_t texture_uid = generate_uid();
+            
+            // link the texture to the material
             FBX::Node c("C");
-            c.AddProperties("OP", texture_uid, material_uid, "DiffuseColor");
+            c.AddProperties("OP", texture_uid, material_uid, prop_name);
             connections.push_back(c);
+            
+            // link the image data to the texture
+            c = FBX::Node("C");
+            c.AddProperties("OO", image_uid, texture_uid);
+            connections.push_back(c);
+            
+            // now write the actual texture node
+            FBX::Node tnode("Texture");
+            // TODO: some way to determine texture name?
+            const std::string texture_name = "" + FBX::SEPARATOR + "Texture";
+            tnode.AddProperties(texture_uid, texture_name, "");
+            // there really doesn't seem to be a better type than this:
+            tnode.AddChild("Type", "TextureVideoClip");
+            tnode.AddChild("Version", int32_t(202));
+            tnode.AddChild("TextureName", texture_name);
+            FBX::Node p("Properties70");
+            p.AddP70enum("CurrentTextureBlendMode", 0); // TODO: verify
+            //p.AddP70string("UVSet", ""); // TODO: how should this work?
+            p.AddP70bool("UseMaterial", 1);
+            tnode.AddChild(p);
+            // can't easily detrmine which texture path will be correct,
+            // so just store what we have in every field.
+            // these being incorrect is a common problem with FBX anyway.
+            tnode.AddChild("FileName", texture_path);
+            tnode.AddChild("RelativeFilename", texture_path);
+            tnode.AddChild("ModelUVTranslation", double(0.0), double(0.0));
+            tnode.AddChild("ModelUVScaling", double(1.0), double(1.0));
+            tnode.AddChild("Texture_Alpha_Soutce", "None");
+            tnode.AddChild("Cropping", int32_t(0), int32_t(0), int32_t(0), int32_t(0));
+            tnode.Dump(outstream);
         }
     }
     
