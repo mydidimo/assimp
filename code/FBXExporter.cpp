@@ -1392,7 +1392,7 @@ void FBXExporter::WriteObjects ()
     // first we should mark all the skeleton nodes,
     // so that they can be treated as LimbNode in stead of Mesh or Null.
     // at the same time we can build up a map of bone nodes.
-    std::unordered_set<aiNode*> limbnodes;
+    std::unordered_set<const aiNode*> limbnodes;
     std::map<std::string,aiNode*> node_by_bone;
     for (size_t mi = 0; mi < mScene->mNumMeshes; ++mi) {
         const aiMesh* m = mScene->mMeshes[mi];
@@ -1412,6 +1412,36 @@ void FBXExporter::WriteObjects ()
             }
             node_by_bone[name] = n;
             limbnodes.insert(n);
+            if (n == mScene->mRootNode) { continue; }
+            // mark all parent nodes as skeleton as well,
+            // up until we find the root node,
+            // or else the node containing the mesh,
+            // or else the parent of a node containig the mesh.
+            for (
+                const aiNode* parent = n->mParent;
+                parent != mScene->mRootNode;
+                parent = parent->mParent
+            ) {
+                bool end = false;
+                for (size_t i = 0; i < parent->mNumMeshes; ++i) {
+                    if (parent->mMeshes[i] == mi) {
+                        end = true;
+                        break;
+                    }
+                }
+                for (size_t j = 0; j < parent->mNumChildren; ++j) {
+                    aiNode* child = parent->mChildren[j];
+                    for (size_t i = 0; i < child->mNumMeshes; ++i) {
+                        if (child->mMeshes[i] == mi) {
+                            end = true;
+                            break;
+                        }
+                    }
+                    if (end) { break; }
+                }
+                if (end) { break; }
+                limbnodes.insert(parent);
+            }
         }
     }
     
@@ -1549,7 +1579,7 @@ void FBXExporter::WriteObjects ()
     // write nodes (i.e. model heirarchy)
     // start at root node
     WriteModelNodes(
-        outstream, mScene->mRootNode, 0, mesh_uids, material_uids
+        outstream, mScene->mRootNode, 0, mesh_uids, material_uids, limbnodes
     );
     
     object_node.End(outstream, true);
@@ -1577,7 +1607,7 @@ const std::map<std::string,std::pair<std::string,char>> transform_types = {
 // write a single model node to the stream
 void WriteModelNode(
     StreamWriterLE& outstream,
-    aiNode* node,
+    const aiNode* node,
     int64_t node_uid,
     const std::string& type,
     const std::vector<std::pair<std::string,aiVector3D>>& transform_chain,
@@ -1651,21 +1681,23 @@ void WriteModelNode(
 // wrapper for WriteModelNodes to create and pass a blank transform chain
 void FBXExporter::WriteModelNodes(
     StreamWriterLE& s,
-    aiNode* node,
+    const aiNode* node,
     int64_t parent_uid,
-    std::vector<int64_t>& mesh_uids,
-    std::vector<int64_t>& material_uids
+    const std::vector<int64_t>& mesh_uids,
+    const std::vector<int64_t>& material_uids,
+    const std::unordered_set<const aiNode*>& limbnodes
 ) {
     std::vector<std::pair<std::string,aiVector3D>> chain;
-    WriteModelNodes(s, node, parent_uid, mesh_uids, material_uids, chain);
+    WriteModelNodes(s, node, parent_uid, mesh_uids, material_uids, limbnodes, chain);
 }
 
 void FBXExporter::WriteModelNodes(
     StreamWriterLE& outstream,
-    aiNode* node,
+    const aiNode* node,
     int64_t parent_uid,
-    std::vector<int64_t>& mesh_uids,
-    std::vector<int64_t>& material_uids,
+    const std::vector<int64_t>& mesh_uids,
+    const std::vector<int64_t>& material_uids,
+    const std::unordered_set<const aiNode*>& limbnodes,
     std::vector<std::pair<std::string,aiVector3D>>& transform_chain
 ) {
     // first collapse any expanded transformation chains created by FBX import.
@@ -1716,7 +1748,7 @@ void FBXExporter::WriteModelNodes(
         // now just continue to the next node
         WriteModelNodes(
             outstream, next_node, parent_uid, mesh_uids, material_uids,
-            transform_chain
+            limbnodes, transform_chain
         );
         return;
     }
@@ -1730,7 +1762,7 @@ void FBXExporter::WriteModelNodes(
         connections.push_back(c);
     }
     
-    // is this a mesh node?
+    // what type of node is this?
     if (node == mScene->mRootNode) {
         // handled later
     } else if (node->mNumMeshes == 1) {
@@ -1748,6 +1780,8 @@ void FBXExporter::WriteModelNodes(
         connections.push_back(c);
         // write model node
         WriteModelNode(outstream, node, node_uid, "Mesh", transform_chain);
+    } else if (limbnodes.count(node)) {
+        WriteModelNode(outstream, node, node_uid, "LimbNode", transform_chain);
     } else {
         // generate a null node so we can add children to it
         WriteModelNode(outstream, node, node_uid, "Null", transform_chain);
@@ -1791,7 +1825,8 @@ void FBXExporter::WriteModelNodes(
     // now recurse into children
     for (size_t i = 0; i < node->mNumChildren; ++i) {
         WriteModelNodes(
-            outstream, node->mChildren[i], node_uid, mesh_uids, material_uids
+            outstream, node->mChildren[i], node_uid, mesh_uids, material_uids,
+            limbnodes
         );
     }
 }
