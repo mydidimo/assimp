@@ -370,7 +370,7 @@ void FBXExporter::WriteGlobalSettings ()
     p.AddP70enum("TimeProtocol", 2);
     p.AddP70enum("SnapOnFrameMode", 0);
     p.AddP70time("TimeSpanStart", 0); // ?
-    p.AddP70time("TimeSpanStop", 0); // ?
+    p.AddP70time("TimeSpanStop", 46186158000); // ?
     p.AddP70double("CustomFrameRate", -1.0);
     p.AddP70("TimeMarker", "Compound", "", ""); // not sure what this is
     p.AddP70int("CurrentTimeMarker", -1);
@@ -392,7 +392,7 @@ void FBXExporter::WriteDocuments ()
     doc.AddProperties(uid, "", "Scene");
     FBX::Node p("Properties70");
     p.AddP70("SourceObject", "object", "", ""); // what is this even for?
-    p.AddP70string("ActiveAnimStackName", "Take 001"); // should do this properly?
+    p.AddP70string("ActiveAnimStackName", ""); // should do this properly?
     doc.AddChild(p);
     
     // UID for root node in scene heirarchy.
@@ -500,7 +500,7 @@ void FBXExporter::WriteDefinitions ()
     
     // AnimationStack / FbxAnimStack
     // this seems to always be here in Maya exports
-    count = 1;
+    count = 0;
     if (count) {
         n = FBX::Node("ObjectType", Property("AnimationStack"));
         n.AddChild("Count", count);
@@ -519,7 +519,7 @@ void FBXExporter::WriteDefinitions ()
     
     // AnimationLayer / FbxAnimLayer
     // this seems to always be here in Maya exports
-    count = 1;
+    count = 0;
     if (count) {
         n = FBX::Node("ObjectType", Property("AnimationLayer"));
         n.AddChild("Count", count);
@@ -540,10 +540,17 @@ void FBXExporter::WriteDefinitions ()
         total_count += count;
     }
     
-    // NodeAttribute / FbxSkeleton
-    // bones are treated specially
+    // NodeAttribute
+    // this is completely absurd.
+    // there can only be one "NodeAttribute" template,
+    // but FbxSkeleton, FbxCamera, FbxLight all are "NodeAttributes".
+    // so if only one exists we should set the template for that,
+    // otherwise... we just pick one :/.
+    // the others have to set all their properties every instance,
+    // because there's no template.
     count = 0;
     if (count) {
+        // FbxSkeleton
         n = FBX::Node("ObjectType", Property("NodeAttribute"));
         n.AddChild("Count", count);
         pt = FBX::Node("PropertyTemplate", Property("FbxSkeleton"));
@@ -931,7 +938,7 @@ void FBXExporter::WriteObjects ()
             normals.Begin(outstream);
             normals.DumpProperties(outstream);
             normals.EndProperties(outstream);
-            WritePropertyNode("Version", int32_t(102), outstream);
+            WritePropertyNode("Version", int32_t(101), outstream);
             WritePropertyNode("Name", "", outstream);
             WritePropertyNode("MappingInformationType", "ByPolygonVertex", outstream);
             // TODO: vertex-normals or indexed normals when appropriate
@@ -948,6 +955,8 @@ void FBXExporter::WriteObjects ()
                 }
             }
             WritePropertyNode("Normals", normal_data, outstream);
+            // note: version 102 has a NormalsW also... not sure what it is,
+            // so we can stick with version 101 for now.
             normals.End(outstream, true);
         }
         
@@ -982,7 +991,7 @@ void FBXExporter::WriteObjects ()
             size_t index = 0;
             for (size_t fi = 0; fi < m->mNumFaces; ++fi) {
                 const aiFace &f = m->mFaces[fi];
-                for (size_t pvi = 0; pvi < f.mNumIndices - 1; ++pvi) {
+                for (size_t pvi = 0; pvi < f.mNumIndices; ++pvi) {
                     const aiVector3D &uv = m->mTextureCoords[uvi][f.mIndices[pvi]];
                     auto elem = index_by_uv.find(uv);
                     if (elem == index_by_uv.end()) {
@@ -1009,7 +1018,7 @@ void FBXExporter::WriteObjects ()
         mat.AddChild("Version", int32_t(101));
         mat.AddChild("Name", "");
         mat.AddChild("MappingInformationType", "AllSame");
-        mat.AddChild("RefereneInformationType", "IndexToDirect");
+        mat.AddChild("ReferenceInformationType", "IndexToDirect");
         std::vector<int32_t> mat_indices = {0};
         mat.AddChild("Materials", mat_indices);
         mat.Dump(outstream);
@@ -1621,6 +1630,7 @@ void WriteModelNode(
     m.AddChild("Version", int32_t(232));
     FBX::Node p("Properties70");
     p.AddP70bool("RotationActive", 1);
+    p.AddP70int("DefaultAttributeIndex", 0);
     p.AddP70enum("InheritType", inherit_type);
     if (transform_chain.empty()) {
         // decompose 4x4 transform matrix into TRS
