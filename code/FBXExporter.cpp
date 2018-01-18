@@ -369,8 +369,8 @@ void FBXExporter::WriteGlobalSettings ()
     p.AddP70enum("TimeMode", 11);
     p.AddP70enum("TimeProtocol", 2);
     p.AddP70enum("SnapOnFrameMode", 0);
-    p.AddP70time("TimeSpanStart", 0); // ?
-    p.AddP70time("TimeSpanStop", 46186158000); // ?
+    p.AddP70time("TimeSpanStart", 0); // TODO: animation support
+    p.AddP70time("TimeSpanStop", FBX::SECOND); // TODO: animation support
     p.AddP70double("CustomFrameRate", -1.0);
     p.AddP70("TimeMarker", "Compound", "", ""); // not sure what this is
     p.AddP70int("CurrentTimeMarker", -1);
@@ -382,7 +382,7 @@ void FBXExporter::WriteGlobalSettings ()
 void FBXExporter::WriteDocuments ()
 {
     // not sure what the use of multiple documents would be,
-    // or whether any end-appication supports it
+    // or whether any end-application supports it
     FBX::Node docs("Documents");
     docs.AddChild("Count", int32_t(1));
     FBX::Node doc("Document");

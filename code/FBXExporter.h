@@ -74,6 +74,7 @@ namespace FBX
     }; // who knows why
     const std::string SEPARATOR = {'\x00', '\x01'}; // for use inside strings
     const std::string MAGIC_NODE_TAG = "_$AssimpFbx$"; // from import
+    const int64_t SECOND = 46186158000; // FBX's kTime unit
     
     class Node;
     class Property;
