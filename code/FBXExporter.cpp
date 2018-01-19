@@ -397,7 +397,8 @@ void FBXExporter::WriteDocuments ()
     
     // UID for root node in scene heirarchy.
     // always set to 0 in the case of a single document.
-    // not sure what happens if more than one document exists.
+    // not sure what happens if more than one document exists,
+    // but that won't matter to us as we're exporting a single scene.
     doc.AddChild("RootNode", int64_t(0));
     
     docs.AddChild(doc);
@@ -452,9 +453,9 @@ size_t count_images(const aiScene* scene) {
             }
         }
     }
-    for (auto &s : images) {
-        cout << "found image: " << s << endl;
-    }
+    //for (auto &s : images) {
+    //    cout << "found image: " << s << endl;
+    //}
     return images.size();
 }
 
@@ -471,6 +472,18 @@ size_t count_textures(const aiScene* scene) {
             if (mat->GetTextureCount(static_cast<aiTextureType>(tt)) > 0) {
                 count += 1;
             }
+        }
+    }
+    return count;
+}
+
+size_t count_deformers(const aiScene* scene) {
+    size_t count = 0;
+    for (size_t i = 0; i < scene->mNumMeshes; ++i) {
+        const size_t n = scene->mMeshes[i]->mNumBones;
+        if (n) {
+            // 1 main deformer, 1 subdeformer per bone
+            count += n + 1;
         }
     }
     return count;
@@ -548,7 +561,7 @@ void FBXExporter::WriteDefinitions ()
     // otherwise... we just pick one :/.
     // the others have to set all their properties every instance,
     // because there's no template.
-    count = 0;
+    count = 1;
     if (count) {
         // FbxSkeleton
         n = FBX::Node("ObjectType", Property("NodeAttribute"));
@@ -809,7 +822,7 @@ void FBXExporter::WriteDefinitions ()
     }
     
     // Deformer
-    count = 0;
+    count = count_deformers(mScene);
     if (count) {
         n = FBX::Node("ObjectType", Property("Deformer"));
         n.AddChild("Count", count);
@@ -1454,6 +1467,13 @@ void FBXExporter::WriteObjects ()
         }
     }
     
+    // we'll need the uids for the bone nodes, so generate them now
+    std::map<std::string,int64_t> bone_uids;
+    for (auto &bone : limbnodes) {
+        std::string bone_name(bone->mName.C_Str());
+        bone_uids[bone_name] = generate_uid();
+    }
+    
     // now, for each aiMesh, we need to export a deformer,
     // and for each aiBone a subdeformer,
     // which should have all the skinning info.
@@ -1577,6 +1597,11 @@ void FBXExporter::WriteObjects ()
             c = FBX::Node("C");
             c.AddProperties("OO", subdeformer_uid, deformer_uid);
             connections.push_back(c); // TODO: emplace_back
+            
+            // we also need to connect the limb node to the subdeformer.
+            c = FBX::Node("C");
+            c.AddProperties("OO", bone_uids[name], subdeformer_uid);
+            connections.push_back(c); // TODO: emplace_back
         }
         
         
@@ -1588,7 +1613,7 @@ void FBXExporter::WriteObjects ()
     // write nodes (i.e. model heirarchy)
     // start at root node
     WriteModelNodes(
-        outstream, mScene->mRootNode, 0, mesh_uids, material_uids, limbnodes
+        outstream, mScene->mRootNode, 0, mesh_uids, material_uids, bone_uids
     );
     
     object_node.End(outstream, true);
@@ -1695,10 +1720,10 @@ void FBXExporter::WriteModelNodes(
     int64_t parent_uid,
     const std::vector<int64_t>& mesh_uids,
     const std::vector<int64_t>& material_uids,
-    const std::unordered_set<const aiNode*>& limbnodes
+    const std::map<std::string,int64_t>& bone_uids
 ) {
     std::vector<std::pair<std::string,aiVector3D>> chain;
-    WriteModelNodes(s, node, parent_uid, mesh_uids, material_uids, limbnodes, chain);
+    WriteModelNodes(s, node, parent_uid, mesh_uids, material_uids, bone_uids, chain);
 }
 
 void FBXExporter::WriteModelNodes(
@@ -1707,7 +1732,7 @@ void FBXExporter::WriteModelNodes(
     int64_t parent_uid,
     const std::vector<int64_t>& mesh_uids,
     const std::vector<int64_t>& material_uids,
-    const std::unordered_set<const aiNode*>& limbnodes,
+    const std::map<std::string,int64_t>& bone_uids,
     std::vector<std::pair<std::string,aiVector3D>>& transform_chain
 ) {
     // first collapse any expanded transformation chains created by FBX import.
@@ -1758,15 +1783,20 @@ void FBXExporter::WriteModelNodes(
         // now just continue to the next node
         WriteModelNodes(
             outstream, next_node, parent_uid, mesh_uids, material_uids,
-            limbnodes, transform_chain
+            bone_uids, transform_chain
         );
         return;
     }
     
     int64_t node_uid = 0;
-    // generate uid and connect to parent, if not the root node
+    // generate uid and connect to parent, if not the root node,
     if (node != mScene->mRootNode) {
-        node_uid = generate_uid();
+        auto elem = bone_uids.find(node_name);
+        if (elem == bone_uids.end()) {
+            node_uid = generate_uid();
+        } else {
+            node_uid = elem->second;
+        }
         FBX::Node c("C");
         c.AddProperties("OO", node_uid, parent_uid);
         connections.push_back(c);
@@ -1790,8 +1820,20 @@ void FBXExporter::WriteModelNodes(
         connections.push_back(c);
         // write model node
         WriteModelNode(outstream, node, node_uid, "Mesh", transform_chain);
-    } else if (limbnodes.count(node)) {
+    } else if (bone_uids.count(node_name)) {
         WriteModelNode(outstream, node, node_uid, "LimbNode", transform_chain);
+        // we also need to write a nodeattribute to mark it as a skeleton
+        int64_t node_attribute_uid = generate_uid();
+        FBX::Node na("NodeAttribute");
+        na.AddProperties(
+            node_attribute_uid, FBX::SEPARATOR + "NodeAttribute", "LimbNode"
+        );
+        na.AddChild("TypeFlags", Property("Skeleton"));
+        na.Dump(outstream);
+        // and connect them
+        FBX::Node c("C");
+        c.AddProperties("OO", node_attribute_uid, node_uid);
+        connections.push_back(c);
     } else {
         // generate a null node so we can add children to it
         WriteModelNode(outstream, node, node_uid, "Null", transform_chain);
@@ -1836,7 +1878,7 @@ void FBXExporter::WriteModelNodes(
     for (size_t i = 0; i < node->mNumChildren; ++i) {
         WriteModelNodes(
             outstream, node->mChildren[i], node_uid, mesh_uids, material_uids,
-            limbnodes
+            bone_uids
         );
     }
 }

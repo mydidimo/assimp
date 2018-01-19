@@ -55,8 +55,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //#include <assimp/material.h>
 
 #include <vector>
-//#include <map>
-#include <unordered_set>
+#include <map>
 #include <memory> // shared_ptr
 #include <sstream> // stringstream
 #include <type_traits> // is_void
@@ -167,7 +166,7 @@ namespace Assimp
             int64_t parent_uid,
             const std::vector<int64_t>& mesh_uids,
             const std::vector<int64_t>& material_uids,
-            const std::unordered_set<const aiNode*>& limbnodes
+            const std::map<std::string,int64_t>& bone_uids
         );
         void WriteModelNodes( // usually don't call this directly
             StreamWriterLE& s,
@@ -175,7 +174,7 @@ namespace Assimp
             int64_t parent_uid,
             const std::vector<int64_t>& mesh_uids,
             const std::vector<int64_t>& material_uids,
-            const std::unordered_set<const aiNode*>& limbnodes,
+            const std::map<std::string,int64_t>& bone_uids,
             std::vector<std::pair<std::string,aiVector3D>>& transform_chain
         );
     };
