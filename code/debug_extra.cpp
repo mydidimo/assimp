@@ -8,7 +8,7 @@
 using std::string; using std::cout; using std::endl;
 
 // print basic info about a loaded aiMesh
-void print_mesh_info(
+void fbx_print_mesh_info(
     const aiMesh* mesh,
     size_t mesh_index=size_t(-1),
     const string &indent="",
@@ -43,7 +43,7 @@ void print_mesh_info(
 }
 
 // prettily print the node graph to stdout
-void print_node_heirarchy(
+void fbx_print_node_heirarchy(
     const aiNode* node,
     const string &indent="",
     bool hideFbxNodes=false,
@@ -55,7 +55,7 @@ void print_node_heirarchy(
     if (hideFbxNodes && name.find("$AssimpFbx$") != string::npos) {
         if (node->mNumChildren == 1) {
             // skip this node
-            print_node_heirarchy(
+            fbx_print_node_heirarchy(
                 node->mChildren[0],
                 indent,
                 hideFbxNodes,
@@ -94,7 +94,7 @@ void print_node_heirarchy(
     else if (last) { nextIndent = indent + "  "; }
     for (size_t i = 0; i < node->mNumChildren; ++i) {
         bool lastone = (i == node->mNumChildren - 1);
-        print_node_heirarchy(
+        fbx_print_node_heirarchy(
             node->mChildren[i],
             nextIndent,
             hideFbxNodes,
