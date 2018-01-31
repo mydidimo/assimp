@@ -129,6 +129,10 @@ namespace Assimp
         
         std::vector<FBX::Node> connections; // conection storage
         
+        std::vector<int64_t> mesh_uids;
+        std::vector<int64_t> material_uids;
+        std::map<const aiNode*,int64_t> node_uids;
+        
         // this crude unique-ID system is actually fine
         int64_t last_uid = 999999;
         int64_t generate_uid() { return ++last_uid; }
@@ -164,16 +168,12 @@ namespace Assimp
             Assimp::StreamWriterLE& s,
             const aiNode* node,
             int64_t parent_uid,
-            const std::vector<int64_t>& mesh_uids,
-            const std::vector<int64_t>& material_uids,
             const std::map<std::string,int64_t>& bone_uids
         );
         void WriteModelNodes( // usually don't call this directly
             StreamWriterLE& s,
             const aiNode* node,
             int64_t parent_uid,
-            const std::vector<int64_t>& mesh_uids,
-            const std::vector<int64_t>& material_uids,
             const std::map<std::string,int64_t>& bone_uids,
             std::vector<std::pair<std::string,aiVector3D>>& transform_chain
         );

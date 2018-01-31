@@ -66,6 +66,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sstream> // stringstream
 #include <ctime> // localtime, tm_*
 #include <map>
+#include <set>
 #include <unordered_set>
 #include <iostream> // endl
 using std::cout; using std::endl;
@@ -155,7 +156,7 @@ void FBXExporter::ExportBinary (
         );
     }
     
-    print_node_heirarchy(mScene->mRootNode, "", true);
+    //fbx_print_node_heirarchy(mScene->mRootNode, "", true);
     
     // first a binary-specific file header
     WriteBinaryHeader();
@@ -814,6 +815,10 @@ void FBXExporter::WriteDefinitions ()
     
     // Pose
     count = 0;
+    for (size_t i = 0; i < mScene->mNumMeshes; ++i) {
+        aiMesh* mesh = mScene->mMeshes[i];
+        if (mesh->HasBones()) { ++count; }
+    }
     if (count) {
         n = FBX::Node("ObjectType", Property("Pose"));
         n.AddChild("Count", count);
@@ -889,7 +894,7 @@ void FBXExporter::WriteObjects ()
     object_node.EndProperties(outstream);
     
     // geometry (aiMesh)
-    std::vector<int64_t> mesh_uids;
+    mesh_uids.clear();
     for (size_t mi = 0; mi < mScene->mNumMeshes; ++mi) {
         // it's all about this mesh
         aiMesh* m = mScene->mMeshes[mi];
@@ -1060,7 +1065,7 @@ void FBXExporter::WriteObjects ()
     }
     
     // aiMaterial
-    std::vector<int64_t> material_uids;
+    material_uids.clear();
     for (size_t i = 0; i < mScene->mNumMaterials; ++i) {
         // it's all about this material
         aiMaterial* m = mScene->mMaterials[i];
@@ -1471,7 +1476,18 @@ void FBXExporter::WriteObjects ()
     std::map<std::string,int64_t> bone_uids;
     for (auto &bone : limbnodes) {
         std::string bone_name(bone->mName.C_Str());
-        bone_uids[bone_name] = generate_uid();
+        aiNode* bone_node = mScene->mRootNode.FindNode(bone->mName);
+        if (!bone_node) {
+            throw DeadlyExportError("Couldn't find node for bone" + bone_name);
+        }
+        auto elem = node_uids.find(bone_node);
+        if (elem == node_uids.end()) {
+            int64_t uid = generate_uid();
+            node_uids[bone_node] = uid;
+            bone_uids[bone_name] = uid;
+        } else {
+            bone_uids[bone_name] = elem->second;
+        }
     }
     
     // now, for each aiMesh, we need to export a deformer,
@@ -1607,13 +1623,89 @@ void FBXExporter::WriteObjects ()
         
     }
     
+    // BindPose
+    //
+    // This section is not strictly necessary,
+    // but some programs (such as Maya) complain if it's missing.
+    // Each BindPose appies to one mesh,
+    // and has the world-space transform of each bone in the bind pose.
+    // The structure is ridiculous, which is probably why it's deprecated.
+    for (size_t mi = 0; mi < mScene->mNumMeshes; ++mi) {
+        aiMesh* mesh = mScene->mMeshes[mi];
+        if (! mesh->HasBones()) { continue; }
+        int64_t bindpose_uid = generate_uid();
+        FBX::Node bpnode("Pose");
+        bpnode.AddProperty(bindpose_uid);
+        // note: this uid is never linked or connected to anything.
+        bpnode.AddProperty(FBX::SEPARATOR + "Pose"); // blank name
+        bpnode.AddProperty("BindPose");
+        
+        bpnode.AddChild("Type", "BindPose");
+        bpnode.AddChild("Version", int32_t(100));
+        
+        aiNode* mesh_node = get_node_for_mesh(mi, mScene->mRootNode);
+        
+        // next get the whole skeleton for this mesh.
+        // we need it all to define the bindpose section.
+        // the FBX SDK will complain if it's missing,
+        // and also if parents of used bones don't have a subdeformer.
+        // order shouldn't matter.
+        std::set<aiNode*> skeleton;
+        for (size_t bi = 0; bi < mesh->mNumBones; ++bi) {
+            // bone node should have already been indexed
+            const aiBone* b = mesh->mBones[bi];
+            const std::string bone_name(b->mName.C_Str());
+            aiNode* parent = node_by_bone[bone_name];
+            // insert all nodes down to the root or mesh node
+            while (
+                parent
+                && parent != mScene->mRootNode
+                && parent != mesh_node
+            ) {
+                skeleton.insert(parent);
+                parent = parent->mParent;
+            }
+        }
+        
+        // number of pose nodes. includes one for the mesh itself.
+        bpnode.AddChild("NbPoseNodes", int32_t(1 + skeleton.size()));
+        
+        // the first pose node is always the mesh itself
+        FBX::Node pose("PoseNode");
+        pose.AddChild("Node", mesh_uids[mi]);
+        aiMatrix4x4 mesh_node_xform = get_world_transform(mesh_node, mScene);
+        pose.AddChild("Matrix", mesh_node_xform);
+        bpnode.AddChild(pose);
+        
+        for (aiNode* bonenode : skeleton) {
+            // does this node have a uid yet?
+            int64_t node_uid;
+            auto node_uid_iter = node_uids.find(bonenode);
+            if (node_uid_iter != node_uids.end()) {
+                node_uid = node_uid_iter->second;
+            } else {
+                node_uid = generate_uid();
+                node_uids[bonenode] = node_uid;
+            }
+            
+            // make a pose thingy
+            pose = FBX::Node("PoseNode");
+            pose.AddChild("Node", node_uid);
+            aiMatrix4x4 node_xform = get_world_transform(bonenode, mScene);
+            pose.AddChild("Matrix", node_xform);
+            bpnode.AddChild(pose);
+        }
+        
+        // now write it
+        bpnode.Dump(outstream);
+    }
     
     // TODO: cameras, lights
     
     // write nodes (i.e. model heirarchy)
     // start at root node
     WriteModelNodes(
-        outstream, mScene->mRootNode, 0, mesh_uids, material_uids, bone_uids
+        outstream, mScene->mRootNode, 0, bone_uids
     );
     
     object_node.End(outstream, true);
@@ -1718,20 +1810,16 @@ void FBXExporter::WriteModelNodes(
     StreamWriterLE& s,
     const aiNode* node,
     int64_t parent_uid,
-    const std::vector<int64_t>& mesh_uids,
-    const std::vector<int64_t>& material_uids,
     const std::map<std::string,int64_t>& bone_uids
 ) {
     std::vector<std::pair<std::string,aiVector3D>> chain;
-    WriteModelNodes(s, node, parent_uid, mesh_uids, material_uids, bone_uids, chain);
+    WriteModelNodes(s, node, parent_uid, bone_uids, chain);
 }
 
 void FBXExporter::WriteModelNodes(
     StreamWriterLE& outstream,
     const aiNode* node,
     int64_t parent_uid,
-    const std::vector<int64_t>& mesh_uids,
-    const std::vector<int64_t>& material_uids,
     const std::map<std::string,int64_t>& bone_uids,
     std::vector<std::pair<std::string,aiVector3D>>& transform_chain
 ) {
@@ -1782,8 +1870,7 @@ void FBXExporter::WriteModelNodes(
         }
         // now just continue to the next node
         WriteModelNodes(
-            outstream, next_node, parent_uid, mesh_uids, material_uids,
-            bone_uids, transform_chain
+            outstream, next_node, parent_uid, bone_uids, transform_chain
         );
         return;
     }
@@ -1791,11 +1878,12 @@ void FBXExporter::WriteModelNodes(
     int64_t node_uid = 0;
     // generate uid and connect to parent, if not the root node,
     if (node != mScene->mRootNode) {
-        auto elem = bone_uids.find(node_name);
-        if (elem == bone_uids.end()) {
-            node_uid = generate_uid();
-        } else {
+        auto elem = node_uids.find(node);
+        if (elem != node_uids.end()) {
             node_uid = elem->second;
+        } else {
+            node_uid = generate_uid();
+            node_uids[node] = node_uid;
         }
         FBX::Node c("C");
         c.AddProperties("OO", node_uid, parent_uid);
@@ -1877,8 +1965,7 @@ void FBXExporter::WriteModelNodes(
     // now recurse into children
     for (size_t i = 0; i < node->mNumChildren; ++i) {
         WriteModelNodes(
-            outstream, node->mChildren[i], node_uid, mesh_uids, material_uids,
-            bone_uids
+            outstream, node->mChildren[i], node_uid, bone_uids
         );
     }
 }
