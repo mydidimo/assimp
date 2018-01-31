@@ -1476,7 +1476,7 @@ void FBXExporter::WriteObjects ()
     std::map<std::string,int64_t> bone_uids;
     for (auto &bone : limbnodes) {
         std::string bone_name(bone->mName.C_Str());
-        aiNode* bone_node = mScene->mRootNode.FindNode(bone->mName);
+        aiNode* bone_node = mScene->mRootNode->FindNode(bone->mName);
         if (!bone_node) {
             throw DeadlyExportError("Couldn't find node for bone" + bone_name);
         }
