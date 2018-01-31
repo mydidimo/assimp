@@ -66,6 +66,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sstream> // stringstream
 #include <ctime> // localtime, tm_*
 #include <map>
+#include <set>
 #include <unordered_set>
 #include <iostream> // endl
 using std::cout; using std::endl;
@@ -794,6 +795,10 @@ void FBXExporter::WriteDefinitions ()
     
     // Pose
     count = 0;
+    for (size_t i = 0; i < mScene->mNumMeshes; ++i) {
+        aiMesh* mesh = mScene->mMeshes[i];
+        if (mesh->HasBones()) { ++count; }
+    }
     if (count) {
         n = FBX::Node("ObjectType", Property("Pose"));
         n.AddChild("Count", count);
@@ -1573,6 +1578,82 @@ void FBXExporter::WriteObjects ()
         
     }
     
+    // BindPose
+    //
+    // This section is not strictly necessary,
+    // but some programs (such as Maya) complain if it's missing.
+    // Each BindPose appies to one mesh,
+    // and has the world-space transform of each bone in the bind pose.
+    // The structure is ridiculous, which is probably why it's deprecated.
+    for (size_t mi = 0; mi < mScene->mNumMeshes; ++mi) {
+        aiMesh* mesh = mScene->mMeshes[mi];
+        if (! mesh->HasBones()) { continue; }
+        int64_t bindpose_uid = generate_uid();
+        FBX::Node bpnode("Pose");
+        bpnode.AddProperty(bindpose_uid);
+        // note: this uid is never linked or connected to anything.
+        bpnode.AddProperty(FBX::SEPARATOR + "Pose"); // blank name
+        bpnode.AddProperty("BindPose");
+        
+        bpnode.AddChild("Type", "BindPose");
+        bpnode.AddChild("Version", int32_t(100));
+        
+        aiNode* mesh_node = get_node_for_mesh(mi, mScene->mRootNode);
+        
+        // next get the whole skeleton for this mesh.
+        // we need it all to define the bindpose section.
+        // the FBX SDK will complain if it's missing,
+        // and also if parents of used bones don't have a subdeformer.
+        // order shouldn't matter.
+        std::set<aiNode*> skeleton;
+        for (size_t bi = 0; bi < mesh->mNumBones; ++bi) {
+            // bone node should have already been indexed
+            const aiBone* b = mesh->mBones[bi];
+            const std::string bone_name(b->mName.C_Str());
+            aiNode* parent = node_by_bone[bone_name];
+            // insert all nodes down to the root or mesh node
+            while (
+                parent
+                && parent != mScene->mRootNode
+                && parent != mesh_node
+            ) {
+                skeleton.insert(parent);
+                parent = parent->mParent;
+            }
+        }
+        
+        // number of pose nodes. includes one for the mesh itself.
+        bpnode.AddChild("NbPoseNodes", int32_t(1 + skeleton.size()));
+        
+        // the first pose node is always the mesh itself
+        FBX::Node pose("PoseNode");
+        pose.AddChild("Node", mesh_uids[mi]);
+        aiMatrix4x4 mesh_node_xform = get_world_transform(mesh_node, mScene);
+        pose.AddChild("Matrix", mesh_node_xform);
+        bpnode.AddChild(pose);
+        
+        for (aiNode* bonenode : skeleton) {
+            // does this node have a uid yet?
+            int64_t node_uid;
+            auto node_uid_iter = node_uids.find(bonenode);
+            if (node_uid_iter != node_uids.end()) {
+                node_uid = node_uid_iter->second;
+            } else {
+                node_uid = generate_uid();
+                node_uids[bonenode] = node_uid;
+            }
+            
+            // make a pose thingy
+            pose = FBX::Node("PoseNode");
+            pose.AddChild("Node", node_uid);
+            aiMatrix4x4 node_xform = get_world_transform(bonenode, mScene);
+            pose.AddChild("Matrix", node_xform);
+            bpnode.AddChild(pose);
+        }
+        
+        // now write it
+        bpnode.Dump(outstream);
+    }
     
     // TODO: cameras, lights
     
@@ -1751,7 +1832,13 @@ void FBXExporter::WriteModelNodes(
     int64_t node_uid = 0;
     // generate uid and connect to parent, if not the root node
     if (node != mScene->mRootNode) {
-        node_uid = generate_uid();
+        auto node_uid_iter = node_uids.find(node);
+        if (node_uid_iter != node_uids.end()) {
+            node_uid = node_uid_iter->second;
+        } else {
+            node_uid = generate_uid();
+            node_uids[node] = node_uid;
+        }
         FBX::Node c("C");
         c.AddProperties("OO", node_uid, parent_uid);
         connections.push_back(c);
