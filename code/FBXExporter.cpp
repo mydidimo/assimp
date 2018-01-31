@@ -869,7 +869,7 @@ void FBXExporter::WriteObjects ()
     object_node.EndProperties(outstream);
     
     // geometry (aiMesh)
-    std::vector<int64_t> mesh_uids;
+    mesh_uids.clear();
     for (size_t mi = 0; mi < mScene->mNumMeshes; ++mi) {
         // it's all about this mesh
         aiMesh* m = mScene->mMeshes[mi];
@@ -1038,7 +1038,7 @@ void FBXExporter::WriteObjects ()
     }
     
     // aiMaterial
-    std::vector<int64_t> material_uids;
+    material_uids.clear();
     for (size_t i = 0; i < mScene->mNumMaterials; ++i) {
         // it's all about this material
         aiMaterial* m = mScene->mMaterials[i];
@@ -1579,7 +1579,7 @@ void FBXExporter::WriteObjects ()
     // write nodes (i.e. model heirarchy)
     // start at root node
     WriteModelNodes(
-        outstream, mScene->mRootNode, 0, mesh_uids, material_uids, limbnodes
+        outstream, mScene->mRootNode, 0, limbnodes
     );
     
     object_node.End(outstream, true);
@@ -1683,20 +1683,16 @@ void FBXExporter::WriteModelNodes(
     StreamWriterLE& s,
     const aiNode* node,
     int64_t parent_uid,
-    const std::vector<int64_t>& mesh_uids,
-    const std::vector<int64_t>& material_uids,
     const std::unordered_set<const aiNode*>& limbnodes
 ) {
     std::vector<std::pair<std::string,aiVector3D>> chain;
-    WriteModelNodes(s, node, parent_uid, mesh_uids, material_uids, limbnodes, chain);
+    WriteModelNodes(s, node, parent_uid, limbnodes, chain);
 }
 
 void FBXExporter::WriteModelNodes(
     StreamWriterLE& outstream,
     const aiNode* node,
     int64_t parent_uid,
-    const std::vector<int64_t>& mesh_uids,
-    const std::vector<int64_t>& material_uids,
     const std::unordered_set<const aiNode*>& limbnodes,
     std::vector<std::pair<std::string,aiVector3D>>& transform_chain
 ) {
@@ -1747,8 +1743,7 @@ void FBXExporter::WriteModelNodes(
         }
         // now just continue to the next node
         WriteModelNodes(
-            outstream, next_node, parent_uid, mesh_uids, material_uids,
-            limbnodes, transform_chain
+            outstream, next_node, parent_uid, limbnodes, transform_chain
         );
         return;
     }
@@ -1825,8 +1820,7 @@ void FBXExporter::WriteModelNodes(
     // now recurse into children
     for (size_t i = 0; i < node->mNumChildren; ++i) {
         WriteModelNodes(
-            outstream, node->mChildren[i], node_uid, mesh_uids, material_uids,
-            limbnodes
+            outstream, node->mChildren[i], node_uid, limbnodes
         );
     }
 }
