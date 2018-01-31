@@ -155,7 +155,7 @@ void FBXExporter::ExportBinary (
         );
     }
     
-    fbx_print_node_heirarchy(mScene->mRootNode, "", true);
+    //fbx_print_node_heirarchy(mScene->mRootNode, "", true);
     
     // first a binary-specific file header
     WriteBinaryHeader();
@@ -452,9 +452,9 @@ size_t count_images(const aiScene* scene) {
             }
         }
     }
-    for (auto &s : images) {
-        cout << "found image: " << s << endl;
-    }
+    //for (auto &s : images) {
+    //    cout << "found image: " << s << endl;
+    //}
     return images.size();
 }
 
