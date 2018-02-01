@@ -43,9 +43,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "FBXExporter.h"
 
-#include "StreamWriter.h"
-
-#include "Exceptional.h" // DeadlyExportError
 //#include "StringComparison.h"
 //#include "ByteSwapper.h"
 
@@ -56,6 +53,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <assimp/IOSystem.hpp>
 #include <assimp/Exporter.hpp>
 #include <assimp/DefaultLogger.hpp>
+#include <assimp/StreamWriter.h> // StreamWriterLE
+#include <assimp/Exceptional.h> // DeadlyExportError
 //#include <assimp/material.h>
 #include <assimp/scene.h>
 #include <assimp/mesh.h>

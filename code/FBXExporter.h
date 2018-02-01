@@ -47,12 +47,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef ASSIMP_BUILD_NO_FBX_EXPORTER
 
-#include "StreamWriter.h" // StreamWriterLE
-#include "Exceptional.h" // DeadlyExportError
-
 #include <assimp/types.h>
 #include <assimp/ai_assert.h>
 //#include <assimp/material.h>
+#include <assimp/StreamWriter.h> // StreamWriterLE
+#include <assimp/Exceptional.h> // DeadlyExportError
 
 #include <vector>
 #include <map>
