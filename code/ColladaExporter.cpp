@@ -2,7 +2,8 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2017, assimp team
+Copyright (c) 2006-2018, assimp team
+
 
 All rights reserved.
 
@@ -43,17 +44,17 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef ASSIMP_BUILD_NO_COLLADA_EXPORTER
 
 #include "ColladaExporter.h"
-#include "Bitmap.h"
-#include "fast_atof.h"
+#include <assimp/Bitmap.h>
+#include <assimp/fast_atof.h>
 #include <assimp/SceneCombiner.h>
-#include "StringUtils.h"
-#include "XMLTools.h"
+#include <assimp/StringUtils.h>
+#include <assimp/XMLTools.h>
 #include <assimp/DefaultIOSystem.h>
 #include <assimp/IOSystem.hpp>
 #include <assimp/Exporter.hpp>
 #include <assimp/scene.h>
 
-#include "Exceptional.h"
+#include <assimp/Exceptional.h>
 
 #include <memory>
 #include <ctime>

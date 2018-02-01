@@ -2,7 +2,8 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2017, assimp team
+Copyright (c) 2006-2018, assimp team
+
 
 All rights reserved.
 
@@ -584,7 +585,7 @@ namespace glTF2 {
         if (bodyBuffer->byteLength > 0) {
             rapidjson::Value glbBodyBuffer;
             glbBodyBuffer.SetObject();
-            glbBodyBuffer.AddMember("byteLength", bodyBuffer->byteLength, mAl);
+            glbBodyBuffer.AddMember("byteLength", static_cast<uint64_t>(bodyBuffer->byteLength), mAl);
             mDoc["buffers"].PushBack(glbBodyBuffer, mAl);
         }
 

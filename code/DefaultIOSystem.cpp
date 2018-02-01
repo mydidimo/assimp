@@ -3,7 +3,8 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2017, assimp team
+Copyright (c) 2006-2018, assimp team
+
 
 
 All rights reserved.
@@ -41,7 +42,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 /** @file Default implementation of IOSystem using the standard C file functions */
 
-#include "StringComparison.h"
+#include <assimp/StringComparison.h>
 
 #include <assimp/DefaultIOSystem.h>
 #include <assimp/DefaultIOStream.h>

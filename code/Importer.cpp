@@ -3,7 +3,8 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2017, assimp team
+Copyright (c) 2006-2018, assimp team
+
 
 
 All rights reserved.
@@ -64,19 +65,19 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // Internal headers
 // ------------------------------------------------------------------------------------------------
 #include "Importer.h"
-#include "BaseImporter.h"
+#include <assimp/BaseImporter.h>
 #include "BaseProcess.h"
 
 #include "DefaultProgressHandler.h"
-#include "GenericProperty.h"
+#include <assimp/GenericProperty.h>
 #include "ProcessHelper.h"
 #include "ScenePreprocessor.h"
 #include "ScenePrivate.h"
-#include "MemoryIOWrapper.h"
-#include "Profiler.h"
-#include "TinyFormatter.h"
-#include "Exceptional.h"
-#include "Profiler.h"
+#include <assimp/MemoryIOWrapper.h>
+#include <assimp/Profiler.h>
+#include <assimp/TinyFormatter.h>
+#include <assimp/Exceptional.h>
+#include <assimp/Profiler.h>
 #include <set>
 #include <memory>
 #include <cctype>

@@ -2,7 +2,8 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2017, assimp team
+Copyright (c) 2006-2018, assimp team
+
 
 All rights reserved.
 
@@ -39,7 +40,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ----------------------------------------------------------------------
 */
 
-#include "StringUtils.h"
+#include <assimp/StringUtils.h>
 
 // Header files, Assimp
 #include <assimp/DefaultLogger.hpp>
@@ -485,7 +486,8 @@ uint8_t* new_data;
 inline size_t Buffer::AppendData(uint8_t* data, size_t length)
 {
     size_t offset = this->byteLength;
-    Grow(length);
+    // Force alignment to 4 bits
+    Grow((length + 3) & ~3);
     memcpy(mData.get() + offset, data, length);
     return offset;
 }

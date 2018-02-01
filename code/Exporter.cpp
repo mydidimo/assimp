@@ -3,7 +3,8 @@
 Open Asset Import Library (assimp)
 ---------------------------------------------------------------------------
 
-Copyright (c) 2006-2017, assimp team
+Copyright (c) 2006-2018, assimp team
+
 
 
 All rights reserved.
@@ -53,7 +54,7 @@ Here we implement only the C++ interface (Assimp::Exporter).
 
 #ifndef ASSIMP_BUILD_NO_EXPORT
 
-#include "BlobIOSystem.h"
+#include <assimp/BlobIOSystem.h>
 #include <assimp/SceneCombiner.h>
 #include "BaseProcess.h"
 #include "Importer.h" // need this for GetPostProcessingStepInstanceList()
@@ -61,7 +62,7 @@ Here we implement only the C++ interface (Assimp::Exporter).
 #include "JoinVerticesProcess.h"
 #include "MakeVerboseFormat.h"
 #include "ConvertToLHProcess.h"
-#include "Exceptional.h"
+#include <assimp/Exceptional.h>
 #include "ScenePrivate.h"
 #include <memory>
 

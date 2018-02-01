@@ -2,7 +2,8 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2017, assimp team
+Copyright (c) 2006-2018, assimp team
+
 
 All rights reserved.
 
@@ -344,9 +345,8 @@ void Document::ReadGlobalSettings()
 {
     const Scope& sc = parser.GetRootScope();
     const Element* const ehead = sc["GlobalSettings"];
-    if(!ehead || !ehead->Compound()) {
-        DOMWarning("no GlobalSettings dictionary found");
-
+    if ( nullptr == ehead || !ehead->Compound() ) {
+        DOMWarning( "no GlobalSettings dictionary found" );
         globals.reset(new FileGlobalSettings(*this, std::make_shared<const PropertyTable>()));
         return;
     }
