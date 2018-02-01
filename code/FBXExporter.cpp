@@ -1629,7 +1629,7 @@ void FBXExporter::WriteObjects ()
     // Each BindPose appies to one mesh,
     // and has the world-space transform of each bone in the bind pose.
     // The structure is ridiculous, which is probably why it's deprecated.
-    for (size_t mi = 0; mi < mScene->mNumMeshes; ++mi) {
+    /*for (size_t mi = 0; mi < mScene->mNumMeshes; ++mi) {
         aiMesh* mesh = mScene->mMeshes[mi];
         if (! mesh->HasBones()) { continue; }
         int64_t bindpose_uid = generate_uid();
@@ -1697,7 +1697,7 @@ void FBXExporter::WriteObjects ()
         
         // now write it
         bpnode.Dump(outstream);
-    }
+    }*/
     
     // TODO: cameras, lights
     
