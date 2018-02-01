@@ -85,6 +85,29 @@ void fbx_print_node_heirarchy(
         cout << ")";
     }
     
+    // print the actual transform
+    aiVector3D s, r, t;
+    node->mTransformation.Decompose(s, r, t);
+    bool testm = false;
+    if (s.x != 1.0 || s.y != 1.0 || s.z != 1.0) {
+        cout << " S: " << s.x << " " << s.y << " " << s.z;
+    }
+    if (r.x || r.y || r.z) {
+        testm = true;
+        cout << " R: " << r.x << " " << r.y << " " << r.z;
+    }
+    if (t.x || t.y || t.z) {
+        cout << " T: " << t.x << " " << t.y << " " << t.z;
+    }
+    if (testm) {
+        const aiMatrix4x4 &m = node->mTransformation;
+        cout << " M:";
+        cout << " " << m.a1 << " " << m.a2 << " " << m.a3 << " " << m.a4;
+        cout << " " << m.b1 << " " << m.b2 << " " << m.b3 << " " << m.b4;
+        cout << " " << m.c1 << " " << m.c2 << " " << m.c3 << " " << m.c4;
+        cout << " " << m.d1 << " " << m.d2 << " " << m.d3 << " " << m.d4;
+    }
+    
     // finish the line
     cout << endl;
     

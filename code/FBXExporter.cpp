@@ -156,7 +156,7 @@ void FBXExporter::ExportBinary (
         );
     }
     
-    //fbx_print_node_heirarchy(mScene->mRootNode, "", true);
+    fbx_print_node_heirarchy(mScene->mRootNode, "", false);
     
     // first a binary-specific file header
     WriteBinaryHeader();
