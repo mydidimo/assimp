@@ -569,7 +569,7 @@ void FBXExporter::WriteDefinitions ()
         pt = FBX::Node("PropertyTemplate", Property("FbxSkeleton"));
         p = FBX::Node("Properties70");
         p.AddP70color("Color", 0.8, 0.8, 0.8);
-        p.AddP70double("Size", 100);
+        p.AddP70double("Size", 33.333333333333);
         p.AddP70("LimbLength", "double", "Number", "H", double(1));
         // note: not sure what the "H" flag is for - hidden?
         pt.AddChild(p);
