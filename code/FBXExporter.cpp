@@ -2,7 +2,7 @@
 Open Asset Import Library (assimp)
 ----------------------------------------------------------------------
 
-Copyright (c) 2006-2017, assimp team
+Copyright (c) 2006-2018, assimp team
 
 All rights reserved.
 
@@ -42,11 +42,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef ASSIMP_BUILD_NO_FBX_EXPORTER
 
 #include "FBXExporter.h"
-
-//#include "StringComparison.h"
-//#include "ByteSwapper.h"
-
-//#include "SplitLargeMeshes.h"
+#include "FBXExportNode.h"
+#include "FBXExportProperty.h"
+#include "FBXCommon.h"
 
 //#include <assimp/SceneCombiner.h>
 #include <assimp/version.h>
@@ -304,9 +302,9 @@ void FBXExporter::WriteHeaderExtension ()
     n.EndProperties(outstream, 0);
     
     // write child nodes
-    WritePropertyNode("FBXHeaderVersion", int32_t(1003), outstream);
-    WritePropertyNode("FBXVersion", int32_t(EXPORT_VERSION_INT), outstream);
-    WritePropertyNode("EncryptionType", int32_t(0), outstream);
+    FBX::Node::WritePropertyNode("FBXHeaderVersion", int32_t(1003), outstream);
+    FBX::Node::WritePropertyNode("FBXVersion", int32_t(EXPORT_VERSION_INT), outstream);
+    FBX::Node::WritePropertyNode("EncryptionType", int32_t(0), outstream);
     
     FBX::Node CreationTimeStamp("CreationTimeStamp");
     time_t rawtime;
@@ -325,7 +323,7 @@ void FBXExporter::WriteHeaderExtension ()
     std::stringstream creator;
     creator << "Open Asset Import Library (Assimp) " << aiGetVersionMajor()
             << "." << aiGetVersionMinor() << "." << aiGetVersionRevision();
-    WritePropertyNode("Creator", creator.str(), outstream);
+    FBX::Node::WritePropertyNode("Creator", creator.str(), outstream);
     
     FBX::Node sceneinfo("SceneInfo");
     //sceneinfo.AddProperty("GlobalInfo" + FBX::SEPARATOR + "SceneInfo");
@@ -343,9 +341,9 @@ void FBXExporter::WriteHeaderExtension ()
     for (size_t i = 0; i < GENERIC_FILEID.size(); ++i) {
         raw[i] = uint8_t(GENERIC_FILEID[i]);
     }
-    WritePropertyNode("FileId", raw, outstream);
-    WritePropertyNode("CreationTime", GENERIC_CTIME, outstream);
-    WritePropertyNode("Creator", creator.str(), outstream);
+    FBX::Node::WritePropertyNode("FileId", raw, outstream);
+    FBX::Node::WritePropertyNode("CreationTime", GENERIC_CTIME, outstream);
+    FBX::Node::WritePropertyNode("Creator", creator.str(), outstream);
 }
 
 void FBXExporter::WriteGlobalSettings ()
@@ -930,7 +928,7 @@ void FBXExporter::WriteObjects ()
                 vertex_indices.push_back(elem->second);
             }
         }
-        WritePropertyNode("Vertices", flattened_vertices, outstream);
+        FBX::Node::WritePropertyNode("Vertices", flattened_vertices, outstream);
         
         // output polygon data as a flattened array of vertex indices.
         // the last vertex index of each polygon is negated and - 1
@@ -942,12 +940,12 @@ void FBXExporter::WriteObjects ()
             }
             polygon_data.push_back(-1 - vertex_indices[f.mIndices[f.mNumIndices-1]]);
         }
-        WritePropertyNode("PolygonVertexIndex", polygon_data, outstream);
+        FBX::Node::WritePropertyNode("PolygonVertexIndex", polygon_data, outstream);
         
         // here could be edges but they're insane.
         // it's optional anyway, so let's ignore it.
         
-        WritePropertyNode("GeometryVersion", int32_t(124), outstream);
+        FBX::Node::WritePropertyNode("GeometryVersion", int32_t(124), outstream);
         
         // normals, if any
         if (m->HasNormals()) {
@@ -955,11 +953,11 @@ void FBXExporter::WriteObjects ()
             normals.Begin(outstream);
             normals.DumpProperties(outstream);
             normals.EndProperties(outstream);
-            WritePropertyNode("Version", int32_t(101), outstream);
-            WritePropertyNode("Name", "", outstream);
-            WritePropertyNode("MappingInformationType", "ByPolygonVertex", outstream);
+            FBX::Node::WritePropertyNode("Version", int32_t(101), outstream);
+            FBX::Node::WritePropertyNode("Name", "", outstream);
+            FBX::Node::WritePropertyNode("MappingInformationType", "ByPolygonVertex", outstream);
             // TODO: vertex-normals or indexed normals when appropriate
-            WritePropertyNode("ReferenceInformationType", "Direct", outstream);
+            FBX::Node::WritePropertyNode("ReferenceInformationType", "Direct", outstream);
             std::vector<double> normal_data;
             normal_data.reserve(3 * polygon_data.size());
             for (size_t fi = 0; fi < m->mNumFaces; ++fi) {
@@ -971,7 +969,7 @@ void FBXExporter::WriteObjects ()
                     normal_data.push_back(n.z);
                 }
             }
-            WritePropertyNode("Normals", normal_data, outstream);
+            FBX::Node::WritePropertyNode("Normals", normal_data, outstream);
             // note: version 102 has a NormalsW also... not sure what it is,
             // so we can stick with version 101 for now.
             normals.End(outstream, true);
@@ -995,12 +993,12 @@ void FBXExporter::WriteObjects ()
             uv.Begin(outstream);
             uv.DumpProperties(outstream);
             uv.EndProperties(outstream);
-            WritePropertyNode("Version", int32_t(101), outstream);
+            FBX::Node::WritePropertyNode("Version", int32_t(101), outstream);
             // it doesn't seem like assimp keeps the uv map name,
             // so just leave it blank.
-            WritePropertyNode("Name", "", outstream);
-            WritePropertyNode("MappingInformationType", "ByPolygonVertex", outstream);
-            WritePropertyNode("ReferenceInformationType", "IndexToDirect", outstream);
+            FBX::Node::WritePropertyNode("Name", "", outstream);
+            FBX::Node::WritePropertyNode("MappingInformationType", "ByPolygonVertex", outstream);
+            FBX::Node::WritePropertyNode("ReferenceInformationType", "IndexToDirect", outstream);
             
             std::vector<double> uv_data;
             std::vector<int32_t> uv_indices;
@@ -1023,8 +1021,8 @@ void FBXExporter::WriteObjects ()
                     }
                 }
             }
-            WritePropertyNode("UV", uv_data, outstream);
-            WritePropertyNode("UVIndex", uv_indices, outstream);
+            FBX::Node::WritePropertyNode("UV", uv_data, outstream);
+            FBX::Node::WritePropertyNode("UVIndex", uv_indices, outstream);
             uv.End(outstream, true);
         }
         
