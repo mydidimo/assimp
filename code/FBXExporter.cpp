@@ -46,14 +46,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "FBXExportProperty.h"
 #include "FBXCommon.h"
 
-//#include <assimp/SceneCombiner.h>
-#include <assimp/version.h>
+#include <assimp/version.h> // aiGetVersion
 #include <assimp/IOSystem.hpp>
 #include <assimp/Exporter.hpp>
 #include <assimp/DefaultLogger.hpp>
 #include <assimp/StreamWriter.h> // StreamWriterLE
 #include <assimp/Exceptional.h> // DeadlyExportError
-//#include <assimp/material.h>
+#include <assimp/material.h> // aiTextureType
 #include <assimp/scene.h>
 #include <assimp/mesh.h>
 
@@ -66,7 +65,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <set>
 #include <unordered_set>
 #include <iostream> // endl
-using std::cout; using std::endl;
 
 #include "debug_extra.cpp" // temporary
 
@@ -89,6 +87,8 @@ namespace FBX {
         "\x28\xb3\x2a\xeb\xb6\x24\xcc\xc2\xbf\xc8\xb0\x2a\xa9\x2b\xfc\xf1";
     const std::string GENERIC_FOOTID =
         "\xfa\xbc\xab\x09\xd0\xc8\xd4\x66\xb1\x76\xfb\x83\x1c\xf7\x26\x7e";
+    const std::string FOOT_MAGIC =
+        "\xf8\x5a\x8c\x6a\xde\xf5\xd9\x7e\xec\xe9\x0c\xe3\x75\x8f\x29\x0b";
 }
 
 using namespace Assimp;
@@ -157,6 +157,7 @@ void FBXExporter::ExportBinary (
         );
     }
     
+    // debug_extra.cpp
     fbx_print_node_heirarchy(mScene->mRootNode, "", false);
     
     // first a binary-specific file header
@@ -256,11 +257,7 @@ void FBXExporter::WriteBinaryFooter()
     for (size_t i = 0; i < 120; ++i) {
         outfile->Write("\x00", 1, 1);
     }
-    outfile->Write(
-        "\xf8\x5a\x8c\x6a\xde\xf5\xd9\x7e\xec\xe9\x0c\xe3\x75\x8f\x29\x0b",
-        1,
-        16
-    );
+    outfile->Write(FOOT_MAGIC.c_str(), FOOT_MAGIC.size(), 1);
 }
 
 void FBXExporter::WriteAllNodes ()
@@ -421,6 +418,12 @@ void FBXExporter::WriteReferences ()
     n.Dump(outfile);
 }
 
+
+// ---------------------------------------------------------------
+// some internal helper functions used for writing the definitions
+// (before any actual data is written)
+// ---------------------------------------------------------------
+
 size_t count_nodes(const aiNode* n) {
     size_t count = 1;
     for (size_t i = 0; i < n->mNumChildren; ++i) {
@@ -462,7 +465,7 @@ size_t count_images(const aiScene* scene) {
         }
     }
     //for (auto &s : images) {
-    //    cout << "found image: " << s << endl;
+    //    std::cout << "found image: " << s << std::endl;
     //}
     return images.size();
 }
@@ -569,7 +572,7 @@ void FBXExporter::WriteDefinitions ()
     // otherwise... we just pick one :/.
     // the others have to set all their properties every instance,
     // because there's no template.
-    count = 1;
+    count = 1; // TODO: select properly
     if (count) {
         // FbxSkeleton
         n = FBX::Node("ObjectType", Property("NodeAttribute"));
@@ -829,9 +832,6 @@ void FBXExporter::WriteDefinitions ()
         total_count += count;
     }
     
-    // CollectionExclusive / FbxDisplayLayer
-    // NOT SUPPORTED
-    
     // Pose
     count = 0;
     for (size_t i = 0; i < mScene->mNumMeshes; ++i) {
@@ -874,6 +874,12 @@ void FBXExporter::WriteDefinitions ()
     for (auto &n : object_nodes) { defs.AddChild(n); }
     defs.Dump(outfile);
 }
+
+
+// -------------------------------------------------------------------
+// some internal helper functions used for writing the objects section
+// (which holds the actual data)
+// -------------------------------------------------------------------
 
 aiNode* get_node_for_mesh(unsigned int meshIndex, aiNode* node)
 {
