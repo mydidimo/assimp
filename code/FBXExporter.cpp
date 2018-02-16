@@ -105,7 +105,7 @@ namespace Assimp {
         const aiScene* pScene,
         const ExportProperties* pProperties
     ){
-        // initialze the exporter
+        // initialize the exporter
         FBXExporter exporter(pScene, pProperties);
         
         // perform binary export
@@ -115,18 +115,18 @@ namespace Assimp {
     // ---------------------------------------------------------------------
     // Worker function for exporting a scene to ASCII FBX.
     // Prototyped and registered in Exporter.cpp
-    void ExportSceneFBXA (
+    /*void ExportSceneFBXA (
         const char* pFile,
         IOSystem* pIOSystem,
         const aiScene* pScene,
         const ExportProperties* pProperties
     ){
-        // initialze the exporter
+        // initialize the exporter
         FBXExporter exporter(pScene, pProperties);
         
         // perform ascii export
         exporter.ExportAscii(pFile, pIOSystem);
-    }
+    }*/ // TODO
 
 } // end of namespace Assimp
 
