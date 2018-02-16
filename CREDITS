@@ -157,6 +157,9 @@ Contributed ExportProperties interface
 Contributed X File exporter
 Contributed Step (stp) exporter
 
+- Thomas Iorns (mesilliac)
+Initial FBX Export support
+
 For a more detailed list just check: https://github.com/assimp/assimp/network/members
 
 Patreons:
@@ -166,3 +169,5 @@ Patreons:
 - elect
 - Steffen
 
+Other mentions:
+- MyDidimo (mydidimo.com): FBX Export Sponsor
