@@ -85,8 +85,10 @@ namespace FBX {
     // what we can do is set them to a known-working version.
     // this is the data that Blender uses in their FBX export process.
     const std::string GENERIC_CTIME = "1970-01-01 10:00:00:000";
-    const std::string GENERIC_FILEID = "\x28\xb3\x2a\xeb\xb6\x24\xcc\xc2\xbf\xc8\xb0\x2a\xa9\x2b\xfc\xf1";
-    const std::string GENERIC_FOOTID = "\xfa\xbc\xab\x09\xd0\xc8\xd4\x66\xb1\x76\xfb\x83\x1c\xf7\x26\x7e";
+    const std::string GENERIC_FILEID =
+        "\x28\xb3\x2a\xeb\xb6\x24\xcc\xc2\xbf\xc8\xb0\x2a\xa9\x2b\xfc\xf1";
+    const std::string GENERIC_FOOTID =
+        "\xfa\xbc\xab\x09\xd0\xc8\xd4\x66\xb1\x76\xfb\x83\x1c\xf7\x26\x7e";
 }
 
 using namespace Assimp;
@@ -94,8 +96,9 @@ using namespace FBX;
 
 namespace Assimp {
 
-    // ------------------------------------------------------------------------------------------------
-    // Worker function for exporting a scene to binary FBX. Prototyped and registered in Exporter.cpp
+    // ---------------------------------------------------------------------
+    // Worker function for exporting a scene to binary FBX.
+    // Prototyped and registered in Exporter.cpp
     void ExportSceneFBX (
         const char* pFile,
         IOSystem* pIOSystem,
@@ -109,8 +112,9 @@ namespace Assimp {
         exporter.ExportBinary(pFile, pIOSystem);
     }
 
-    // ------------------------------------------------------------------------------------------------
-    // Worker function for exporting a scene to ASCII FBX. Prototyped and registered in Exporter.cpp
+    // ---------------------------------------------------------------------
+    // Worker function for exporting a scene to ASCII FBX.
+    // Prototyped and registered in Exporter.cpp
     void ExportSceneFBXA (
         const char* pFile,
         IOSystem* pIOSystem,
@@ -302,9 +306,15 @@ void FBXExporter::WriteHeaderExtension ()
     n.EndProperties(outstream, 0);
     
     // write child nodes
-    FBX::Node::WritePropertyNode("FBXHeaderVersion", int32_t(1003), outstream);
-    FBX::Node::WritePropertyNode("FBXVersion", int32_t(EXPORT_VERSION_INT), outstream);
-    FBX::Node::WritePropertyNode("EncryptionType", int32_t(0), outstream);
+    FBX::Node::WritePropertyNode(
+        "FBXHeaderVersion", int32_t(1003), outstream
+    );
+    FBX::Node::WritePropertyNode(
+        "FBXVersion", int32_t(EXPORT_VERSION_INT), outstream
+    );
+    FBX::Node::WritePropertyNode(
+        "EncryptionType", int32_t(0), outstream
+    );
     
     FBX::Node CreationTimeStamp("CreationTimeStamp");
     time_t rawtime;
@@ -650,11 +660,23 @@ void FBXExporter::WriteDefinitions ()
         p.AddP70int("DefaultAttributeIndex", -1);
         p.AddP70bool("Freeze", 0);
         p.AddP70bool("LODBox", 0);
-        p.AddP70("Lcl Translation", "Lcl Translation", "", "A", double(0), double(0), double(0));
-        p.AddP70("Lcl Rotation", "Lcl Rotation", "", "A", double(0), double(0), double(0));
-        p.AddP70("Lcl Scaling", "Lcl Scaling", "", "A", double(1), double(1), double(1));
+        p.AddP70(
+            "Lcl Translation", "Lcl Translation", "", "A",
+            double(0), double(0), double(0)
+        );
+        p.AddP70(
+            "Lcl Rotation", "Lcl Rotation", "", "A",
+            double(0), double(0), double(0)
+        );
+        p.AddP70(
+            "Lcl Scaling", "Lcl Scaling", "", "A",
+            double(1), double(1), double(1)
+        );
         p.AddP70("Visibility", "Visibility", "", "A", double(1));
-        p.AddP70("Visibility Inheritance", "Visibility Inheritance", "", "", int32_t(1));
+        p.AddP70(
+            "Visibility Inheritance", "Visibility Inheritance", "", "",
+            int32_t(1)
+        );
         pt.AddChild(p);
         n.AddChild(pt);
         object_nodes.push_back(n);
@@ -928,7 +950,9 @@ void FBXExporter::WriteObjects ()
                 vertex_indices.push_back(elem->second);
             }
         }
-        FBX::Node::WritePropertyNode("Vertices", flattened_vertices, outstream);
+        FBX::Node::WritePropertyNode(
+            "Vertices", flattened_vertices, outstream
+        );
         
         // output polygon data as a flattened array of vertex indices.
         // the last vertex index of each polygon is negated and - 1
@@ -938,14 +962,20 @@ void FBXExporter::WriteObjects ()
             for (size_t pvi = 0; pvi < f.mNumIndices - 1; ++pvi) {
                 polygon_data.push_back(vertex_indices[f.mIndices[pvi]]);
             }
-            polygon_data.push_back(-1 - vertex_indices[f.mIndices[f.mNumIndices-1]]);
+            polygon_data.push_back(
+                -1 - vertex_indices[f.mIndices[f.mNumIndices-1]]
+            );
         }
-        FBX::Node::WritePropertyNode("PolygonVertexIndex", polygon_data, outstream);
+        FBX::Node::WritePropertyNode(
+            "PolygonVertexIndex", polygon_data, outstream
+        );
         
         // here could be edges but they're insane.
         // it's optional anyway, so let's ignore it.
         
-        FBX::Node::WritePropertyNode("GeometryVersion", int32_t(124), outstream);
+        FBX::Node::WritePropertyNode(
+            "GeometryVersion", int32_t(124), outstream
+        );
         
         // normals, if any
         if (m->HasNormals()) {
@@ -955,9 +985,13 @@ void FBXExporter::WriteObjects ()
             normals.EndProperties(outstream);
             FBX::Node::WritePropertyNode("Version", int32_t(101), outstream);
             FBX::Node::WritePropertyNode("Name", "", outstream);
-            FBX::Node::WritePropertyNode("MappingInformationType", "ByPolygonVertex", outstream);
+            FBX::Node::WritePropertyNode(
+                "MappingInformationType", "ByPolygonVertex", outstream
+            );
             // TODO: vertex-normals or indexed normals when appropriate
-            FBX::Node::WritePropertyNode("ReferenceInformationType", "Direct", outstream);
+            FBX::Node::WritePropertyNode(
+                "ReferenceInformationType", "Direct", outstream
+            );
             std::vector<double> normal_data;
             normal_data.reserve(3 * polygon_data.size());
             for (size_t fi = 0; fi < m->mNumFaces; ++fi) {
@@ -983,8 +1017,11 @@ void FBXExporter::WriteObjects ()
                 std::stringstream err;
                 err << "Only 2-channel UV maps supported by FBX,";
                 err << " but mesh " << mi;
-                if (m->mName.length) { err << " (" << m->mName.C_Str() << ")"; }
-                err << " UV map " << uvi << " has " << m->mNumUVComponents[uvi];
+                if (m->mName.length) {
+                    err << " (" << m->mName.C_Str() << ")";
+                }
+                err << " UV map " << uvi;
+                err << " has " << m->mNumUVComponents[uvi];
                 err << " components! Data will be preserved,";
                 err << " but may be incorrectly interpreted on load.";
                 DefaultLogger::get()->warn(err.str());
@@ -997,8 +1034,12 @@ void FBXExporter::WriteObjects ()
             // it doesn't seem like assimp keeps the uv map name,
             // so just leave it blank.
             FBX::Node::WritePropertyNode("Name", "", outstream);
-            FBX::Node::WritePropertyNode("MappingInformationType", "ByPolygonVertex", outstream);
-            FBX::Node::WritePropertyNode("ReferenceInformationType", "IndexToDirect", outstream);
+            FBX::Node::WritePropertyNode(
+                "MappingInformationType", "ByPolygonVertex", outstream
+            );
+            FBX::Node::WritePropertyNode(
+                "ReferenceInformationType", "IndexToDirect", outstream
+            );
             
             std::vector<double> uv_data;
             std::vector<int32_t> uv_indices;
@@ -1007,7 +1048,8 @@ void FBXExporter::WriteObjects ()
             for (size_t fi = 0; fi < m->mNumFaces; ++fi) {
                 const aiFace &f = m->mFaces[fi];
                 for (size_t pvi = 0; pvi < f.mNumIndices; ++pvi) {
-                    const aiVector3D &uv = m->mTextureCoords[uvi][f.mIndices[pvi]];
+                    const aiVector3D &uv =
+                        m->mTextureCoords[uvi][f.mIndices[pvi]];
                     auto elem = index_by_uv.find(uv);
                     if (elem == index_by_uv.end()) {
                         index_by_uv[uv] = index;
@@ -1368,7 +1410,9 @@ void FBXExporter::WriteObjects ()
             tnode.AddChild("ModelUVTranslation", double(0.0), double(0.0));
             tnode.AddChild("ModelUVScaling", double(1.0), double(1.0));
             tnode.AddChild("Texture_Alpha_Soutce", "None");
-            tnode.AddChild("Cropping", int32_t(0), int32_t(0), int32_t(0), int32_t(0));
+            tnode.AddChild(
+                "Cropping", int32_t(0), int32_t(0), int32_t(0), int32_t(0)
+            );
             tnode.Dump(outstream);
         }
     }
@@ -1941,7 +1985,9 @@ void FBXExporter::WriteModelNodes(
             c = FBX::Node("C");
             c.AddProperties(
                 "OO",
-                material_uids[mScene->mMeshes[node->mMeshes[i]]->mMaterialIndex],
+                material_uids[
+                    mScene->mMeshes[node->mMeshes[i]]->mMaterialIndex
+                ],
                 new_node_uid
             );
             connections.push_back(c);

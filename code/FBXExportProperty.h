@@ -105,7 +105,7 @@ public:
     template <class T>
     explicit Property(T v) : type('X') {
         static_assert(std::is_void<T>::value, "TRIED TO CREATE FBX PROPERTY WITH UNSUPPORTED TYPE, CHECK YOUR PROPERTY INSTANTIATION");
-    }
+    } // note: no line wrap so it appears verbatim on the compiler error
     
     // the size of this property node in a binary file, in bytes
     size_t size();
