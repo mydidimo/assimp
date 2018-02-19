@@ -98,7 +98,7 @@ public:
     explicit Property(const std::vector<int32_t>& va);
     explicit Property(const std::vector<double>& va);
     explicit Property(const aiMatrix4x4& vm);
-    
+
     // this will catch any type not defined above,
     // so that we don't accidentally convert something we don't want.
     // for example (const char*) --> (bool)... seriously wtf C++
@@ -106,10 +106,10 @@ public:
     explicit Property(T v) : type('X') {
         static_assert(std::is_void<T>::value, "TRIED TO CREATE FBX PROPERTY WITH UNSUPPORTED TYPE, CHECK YOUR PROPERTY INSTANTIATION");
     } // note: no line wrap so it appears verbatim on the compiler error
-    
+
     // the size of this property node in a binary file, in bytes
     size_t size();
-    
+
     // write this property node as binary data to the given stream
     void Dump(Assimp::StreamWriterLE &s);
 

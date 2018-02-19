@@ -157,16 +157,16 @@ void FBX::Node::Dump(Assimp::StreamWriterLE &s)
 {
     // write header section (with placeholders for some things)
     Begin(s);
-    
+
     // write properties
     DumpProperties(s);
-    
+
     // go back and fill in property related placeholders
     EndProperties(s, properties.size());
-    
+
     // write children
     DumpChildren(s);
-    
+
     // finish, filling in end offset placeholder
     End(s, !children.empty());
 }
@@ -175,16 +175,16 @@ void FBX::Node::Begin(Assimp::StreamWriterLE &s)
 {
     // remember start pos so we can come back and write the end pos
     this->start_pos = s.Tell();
-    
+
     // placeholders for end pos and property section info
     s.PutU4(0); // end pos
     s.PutU4(0); // number of properties
     s.PutU4(0); // total property section length
-    
+
     // node name
     s.PutU1(name.size()); // length of node name
     s.PutString(name); // node name as raw bytes
-    
+
     // property data comes after here
     this->property_start = s.Tell();
 }
@@ -228,7 +228,7 @@ void FBX::Node::End(
 ) {
     // if there were children, add a null record
     if (has_children) { s.PutString(FBX::NULL_RECORD); }
-    
+
     // now go back and write initial pos
     this->end_pos = s.Tell();
     s.Seek(start_pos);

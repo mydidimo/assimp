@@ -77,7 +77,7 @@ namespace Assimp
     public:
         /// Constructor for a specific scene to export
         FBXExporter(const aiScene* pScene, const ExportProperties* pProperties);
-        
+
         // call one of these methods to export
         void ExportBinary(const char* pFile, IOSystem* pIOSystem);
         void ExportAscii(const char* pFile, IOSystem* pIOSystem);
@@ -87,26 +87,26 @@ namespace Assimp
         const aiScene* mScene; // the scene to export
         const ExportProperties* mProperties; // currently unused
         std::shared_ptr<IOStream> outfile; // file to write to
-        
+
         std::vector<FBX::Node> connections; // conection storage
-        
+
         std::vector<int64_t> mesh_uids;
         std::vector<int64_t> material_uids;
         std::map<const aiNode*,int64_t> node_uids;
-        
+
         // this crude unique-ID system is actually fine
         int64_t last_uid = 999999;
         int64_t generate_uid() { return ++last_uid; }
-        
+
         // binary files have a specific header and footer,
         // in addition to the actual data
         void WriteBinaryHeader();
         void WriteBinaryFooter();
-        
+
         // WriteAllNodes does the actual export.
         // It just calls all the Write<Section> methods below in order.
         void WriteAllNodes();
-        
+
         // Methods to write individual sections.
         // The order here matches the order inside an FBX file.
         // Each method corresponds to a top-level FBX section,
@@ -123,7 +123,7 @@ namespace Assimp
         void WriteObjects();
         void WriteConnections();
         // WriteTakes(); // deprecated since at least 2015 (fbx 7.4)
-        
+
         // helpers
         void WriteModelNodes(
             Assimp::StreamWriterLE& s,

@@ -81,7 +81,7 @@ public: // functions to add properties or children
     void AddProperty(T value) {
         properties.emplace_back(value);
     }
-    
+
     // convenience function to add multiple properties at once
     template <typename T, typename... More>
     void AddProperties(T value, More... more) {
@@ -89,10 +89,10 @@ public: // functions to add properties or children
         AddProperties(more...);
     }
     void AddProperties() {}
-    
+
     // add a child node directly
     void AddChild(const Node& node) { children.push_back(node); }
-    
+
     // convenience function to add a child node with a single property
     template <typename... More>
     void AddChild(
@@ -120,7 +120,7 @@ public: // support specifically for dealing with Properties70 nodes
     void AddP70string(const std::string& name, const std::string& value);
     void AddP70enum(const std::string& name, int32_t value);
     void AddP70time(const std::string& name, int64_t value);
-    
+
     // template for custom P70 nodes.
     // anything that doesn't fit in the above can be created manually.
     template <typename... More>
@@ -141,7 +141,7 @@ public: // member functions for writing data to a file or stream
     // write the full node as binary data to the given file or stream
     void Dump(std::shared_ptr<Assimp::IOStream> outfile);
     void Dump(Assimp::StreamWriterLE &s);
-    
+
     // these other functions are for writing data piece by piece.
     // they must be used carefully.
     // for usage examples see FBXExporter.cpp.
