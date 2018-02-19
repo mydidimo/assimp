@@ -108,6 +108,7 @@ public: // support specifically for dealing with Properties70 nodes
 
     // it really is simpler to make these all separate functions.
     // the versions with 'A' suffixes are for animatable properties.
+    // those often follow a completely different format internally in FBX.
     void AddP70int(const std::string& name, int32_t value);
     void AddP70bool(const std::string& name, bool value);
     void AddP70double(const std::string& name, double value);

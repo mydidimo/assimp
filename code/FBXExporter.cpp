@@ -1635,21 +1635,17 @@ void FBXExporter::WriteObjects ()
             sdnode.AddChild("Indexes", subdef_indices);
             sdnode.AddChild("Weights", subdef_weights);
             // transform is the transform of the mesh, but in bone space...
-            // should be the inverse of assimp's mOffsetMatrix.
+            // which is exactly what assimp's mOffsetMatrix is,
+            // no matter what the assimp docs may say.
             aiMatrix4x4 tr = b->mOffsetMatrix;
-            /// ... however mOffsetMatrix is clearly the mesh in bone space.
-            // this directly contradicts the docs :/
-            //tr.Inverse();
             sdnode.AddChild("Transform", tr);
             // transformlink should be the position of the bone in world space,
             // in the bind pose.
-            // as mOffsetMatrix is in fact for the mesh in bone space,
-            // to get the bone in world space we need to take the inverse,
-            // and multiply by the mesh's world space position
+            // For now let's use the inverse of mOffsetMatrix,
+            // and the (assumedly static) mesh position in world space.
+            // TODO: find a better way of doing this? there aren't many options
             tr = b->mOffsetMatrix;
             tr.Inverse();
-            // (not that it makes sense to take the mesh position,
-            // as it could be instanced, but there's no better alternative)
             tr *= mesh_node_xform;
             sdnode.AddChild("TransformLink", tr);
             
@@ -1672,11 +1668,16 @@ void FBXExporter::WriteObjects ()
     
     // BindPose
     //
-    // This section is not strictly necessary,
-    // but some programs (such as Maya) complain if it's missing.
-    // Each BindPose appies to one mesh,
-    // and has the world-space transform of each bone in the bind pose.
-    // The structure is ridiculous, which is probably why it's deprecated.
+    // This is a legacy system, which should be unnecessary.
+    //
+    // Somehow including it slows file loading by the official FBX SDK,
+    // and as it can reconstruct it from the deformers anyway,
+    // this is not currently included.
+    //
+    // The code is kept here in case it's useful in the future,
+    // but it's pretty much a hack anyway,
+    // as assimp doesn't store bindpose information for full skeletons.
+    //
     /*for (size_t mi = 0; mi < mScene->mNumMeshes; ++mi) {
         aiMesh* mesh = mScene->mMeshes[mi];
         if (! mesh->HasBones()) { continue; }
@@ -1819,7 +1820,10 @@ void WriteModelNode(
             );
         }
     } else {
-        // apply the transformation chain
+        // apply the transformation chain.
+        // these transformation elements are created when importing FBX,
+        // which has a complex transformation heirarchy for each node.
+        // as such we can bake the heirarchy back into the node on export.
         for (auto &item : transform_chain) {
             auto elem = transform_types.find(item.first);
             if (elem == transform_types.end()) {
@@ -1876,7 +1880,7 @@ void FBXExporter::WriteModelNodes(
         if (node->mNumChildren != 1) {
             // this should never happen
             std::stringstream err;
-            err << "FBX transformation node should have 1 child,";
+            err << "FBX transformation node should have exactly 1 child,";
             err << " but " << node->mNumChildren << " found";
             err << " on node \"" << node_name << "\"!";
             throw DeadlyExportError(err.str());
