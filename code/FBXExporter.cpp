@@ -1439,7 +1439,7 @@ void FBXExporter::WriteObjects ()
     // well. we can assume a sane input, i suppose.
     //
     // so input is the bone node heirarchy,
-    // with an extra thing for the transformation of the BONE in MESH space.
+    // with an extra thing for the transformation of the MESH in BONE space.
     //
     // output is a set of bone nodes,
     // a "bindpose" which indicates the default local transform of all bones,
