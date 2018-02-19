@@ -66,7 +66,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <unordered_set>
 #include <iostream> // endl
 
-#include "debug_extra.cpp" // temporary
+//#include "debug_extra.cpp" // temporary
 
 // RESOURCES:
 // https://code.blender.org/2013/08/fbx-binary-file-format-specification/
@@ -158,7 +158,7 @@ void FBXExporter::ExportBinary (
     }
 
     // debug_extra.cpp
-    fbx_print_node_heirarchy(mScene->mRootNode, "", false);
+    //fbx_print_node_heirarchy(mScene->mRootNode, "", false);
 
     // first a binary-specific file header
     WriteBinaryHeader();
